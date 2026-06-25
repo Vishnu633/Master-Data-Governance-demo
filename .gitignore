@@ -1,0 +1,23 @@
+# .NET Core Build and Output files
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+Publish/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# SQLite DB lock and temporary files (Keep mdg.db for pre-seeded quickstart)
+*.db-shm
+*.db-wal
+
+# Frontend Build & Dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Operating System Files
+.DS_Store
+Thumbs.db

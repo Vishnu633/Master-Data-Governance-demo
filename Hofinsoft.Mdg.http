@@ -1,0 +1,6 @@
+@Hofinsoft.Mdg_HostAddress = http://localhost:5181
+
+GET {{Hofinsoft.Mdg_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
