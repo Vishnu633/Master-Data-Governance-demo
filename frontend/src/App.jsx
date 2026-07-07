@@ -1,587 +1,1482 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
-const API_BASE = 'http://localhost:5181/api';
+const API = 'http://localhost:5181/api';
 
-const safeParseResponse = async (res) => {
-  const text = await res.text();
-  try {
-    return JSON.parse(text);
-  } catch (err) {
-    return { message: text };
-  }
+// ─── Preconfigured Simulated Users ──────────────────────────
+const SIMULATED_USERS = [
+  { id: 1, name: 'Sarah J.', role: 'Requester', email: 'sarah.j@nomcat.io', avatarColor: '#3b82f6', icon: '📝', desc: 'Can submit new requests & bulk uploads' },
+  { id: 2, name: 'Michael R.', role: 'Approver', email: 'michael.r@nomcat.io', avatarColor: '#f59e0b', icon: '👤', desc: 'First-level approval & staging supervisor' },
+  { id: 3, name: 'Alex C.', role: 'CentralCataloger', email: 'alex.c@nomcat.io', avatarColor: '#10b981', icon: '⚙️', desc: 'Standardizes nomenclature and specifications' },
+  { id: 4, name: 'Sophia K.', role: 'CentralApprover', email: 'sophia.k@nomcat.io', avatarColor: '#8b5cf6', icon: '🏆', desc: 'Final sign-off to publish to Golden Catalog' }
+];
+
+// ─── Zero-Dependency Markdown Parser ────────────────────────
+const renderMarkdown = (text) => {
+  if (!text) return "";
+  const lines = text.split('\n');
+  return lines.map((line, idx) => {
+    let isBullet = false;
+    let cleanLine = line;
+    if (line.trim().startsWith('- ')) {
+      isBullet = true;
+      cleanLine = line.trim().substring(2);
+    }
+    
+    const parts = [];
+    const regex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+    const splitParts = cleanLine.split(regex);
+    
+    splitParts.forEach((part, pIdx) => {
+      if (part.startsWith('**') && part.endsWith('**')) {
+        parts.push(<strong key={pIdx} style={{ color: '#fff', fontWeight: '700' }}>{part.slice(2, -2)}</strong>);
+      } else if (part.startsWith('*') && part.endsWith('*')) {
+        parts.push(<em key={pIdx}>{part.slice(1, -1)}</em>);
+      } else if (part.startsWith('`') && part.endsWith('`')) {
+        parts.push(<code key={pIdx} style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 4px', borderRadius: '3px', fontFamily: 'monospace', color: '#a5b4fc', fontSize: '0.72rem' }}>{part.slice(1, -1)}</code>);
+      } else {
+        parts.push(part);
+      }
+    });
+
+    if (isBullet) {
+      return (
+        <li key={idx} style={{ marginLeft: '1rem', listStyleType: 'disc', marginTop: '3px', marginBottom: '3px' }}>
+          {parts}
+        </li>
+      );
+    }
+    return <div key={idx} style={{ minHeight: '1.1em' }}>{parts}</div>;
+  });
 };
 
-function App() {
-  const [activeTab, setActiveTab] = useState('cataloging');
-  const [templates, setTemplates] = useState([]);
-  
-  // Selection States
-  const [selectedNoun, setSelectedNoun] = useState('');
-  const [selectedModifier, setSelectedModifier] = useState('');
-  const [activeTemplate, setActiveTemplate] = useState(null);
-  const [attributeInputs, setAttributeInputs] = useState({});
-  
-  // Data Grid States
-  const [stagingItems, setStagingItems] = useState([]);
-  const [productionItems, setProductionItems] = useState([]);
-  
-  // Loading & UI feedback
-  const [loading, setLoading] = useState({ templates: false, staging: false, production: false });
-  const [feedback, setFeedback] = useState(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+// ─── Toast Notification System ───────────────────────────────
+function ToastContainer({ toasts, onDismiss }) {
+  return (
+    <div className="toast-container">
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast ${t.type}`}>
+          <span className="toast-icon">
+            {t.type === 'success' ? '✅' : t.type === 'error' ? '❌' : '⚠️'}
+          </span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: '0.8rem', color: '#fff' }}>{t.title}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>{t.message}</div>
+          </div>
+          <button className="toast-close" onClick={() => onDismiss(t.id)}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
-  // Fetch Templates on Mount
-  useEffect(() => {
-    fetchTemplates();
+function useToast() {
+  const [toasts, setToasts] = useState([]);
+  const addToast = useCallback((type, title, message) => {
+    const id = Date.now() + Math.random();
+    setToasts((prev) => [...prev, { id, type, title, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
   }, []);
+  const dismissToast = useCallback((id) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+  return { toasts, addToast, dismissToast };
+}
 
-  // Fetch Staging or Production items when tabs switch
-  useEffect(() => {
-    if (activeTab === 'staging') {
-      fetchStagingItems();
-    } else if (activeTab === 'production') {
-      fetchProductionItems();
-    }
-  }, [activeTab]);
+// ─── Status Badge ────────────────────────────────────────────
+function StatusBadge({ status }) {
+  const classMap = {
+    Stage1_Validated: 'badge-validated',
+    In_Progress: 'badge-progress',
+    Approved: 'badge-approved',
+    DUPLICATED: 'badge-duplicated',
+    Duplicated: 'badge-duplicated',
+    Rejected: 'badge-rejected',
+    Pending: 'badge-pending',
+  };
+  return <span className={`badge ${classMap[status] || 'badge-pending'}`}>{status?.replace(/_/g, ' ')}</span>;
+}
 
-  // Handle Noun/Modifier changes to load matching template
-  useEffect(() => {
-    if (selectedNoun && selectedModifier) {
-      const match = templates.find(
-        t => t.noun.toUpperCase() === selectedNoun.toUpperCase() && 
-             t.modifier.toUpperCase() === selectedModifier.toUpperCase()
+// ─── Pipeline Visual ─────────────────────────────────────────
+function PipelineVisual({ currentStage, totalStages }) {
+  const dots = [];
+  for (let i = 1; i <= totalStages; i++) {
+    if (i > 1) {
+      dots.push(
+        <div key={`line-${i}`} className={`pipeline-line ${i <= currentStage ? 'completed' : ''}`} />
       );
-      if (match) {
-        setActiveTemplate(match);
-        // Initialize attribute input fields with empty strings
-        const initialInputs = {};
-        match.requiredAttributes.forEach(attr => {
-          initialInputs[attr] = '';
-        });
-        setAttributeInputs(initialInputs);
-      } else {
-        setActiveTemplate(null);
-        setAttributeInputs({});
-      }
-    } else {
-      setActiveTemplate(null);
-      setAttributeInputs({});
     }
-  }, [selectedNoun, selectedModifier, templates]);
+    dots.push(
+      <div
+        key={`dot-${i}`}
+        className={`pipeline-dot ${i < currentStage ? 'completed' : i === currentStage ? 'current' : ''}`}
+        title={`Stage ${i}`}
+      />
+    );
+  }
+  return <div className="pipeline-visual">{dots}</div>;
+}
 
-  const fetchTemplates = async () => {
-    setLoading(prev => ({ ...prev, templates: true }));
-    try {
-      const res = await fetch(`${API_BASE}/templates`);
-      if (res.ok) {
-        const data = await safeParseResponse(res);
-        setTemplates(data);
-      } else {
-        showFeedback('danger', 'Failed to Load Templates', 'Error retrieving governance templates from backend.');
-      }
-    } catch (err) {
-      showFeedback('danger', 'Connection Error', 'Could not connect to backend API server.');
-    } finally {
-      setLoading(prev => ({ ...prev, templates: false }));
-    }
-  };
+// ─── Login Screen ────────────────────────────────────────────
+function Login({ onLogin }) {
+  const [selectedUser, setSelectedUser] = useState(null);
 
-  const fetchStagingItems = async () => {
-    setLoading(prev => ({ ...prev, staging: true }));
-    try {
-      const res = await fetch(`${API_BASE}/staging`);
-      if (res.ok) {
-        const data = await safeParseResponse(res);
-        setStagingItems(data);
-      }
-    } catch (err) {
-      showFeedback('danger', 'Error', 'Failed to fetch staging requests.');
-    } finally {
-      setLoading(prev => ({ ...prev, staging: false }));
-    }
-  };
-
-  const fetchProductionItems = async () => {
-    setLoading(prev => ({ ...prev, production: true }));
-    try {
-      const res = await fetch(`${API_BASE}/production`);
-      if (res.ok) {
-        const data = await safeParseResponse(res);
-        setProductionItems(data);
-      }
-    } catch (err) {
-      showFeedback('danger', 'Error', 'Failed to fetch production catalog records.');
-    } finally {
-      setLoading(prev => ({ ...prev, production: false }));
-    }
-  };
-
-  const showFeedback = (type, title, detail, errors = []) => {
-    setFeedback({ type, title, detail, errors });
-    // Auto clear success feedbacks after 8s
-    if (type === 'success') {
-      setTimeout(() => setFeedback(null), 8000);
-    }
-  };
-
-  const handleAttributeChange = (attrName, value) => {
-    setAttributeInputs(prev => ({
-      ...prev,
-      [attrName]: value
-    }));
-  };
-
-  const resetForm = () => {
-    setSelectedNoun('');
-    setSelectedModifier('');
-    setActiveTemplate(null);
-    setAttributeInputs({});
-  };
-
-  // Submit Draft Material (Minimal validation)
-  const handleSubmitDraft = async (e) => {
+  const handleSignIn = (e) => {
     e.preventDefault();
-    if (!selectedNoun || !selectedModifier) return;
-
-    setIsSubmitting(true);
-    setFeedback(null);
-
-    const payload = {
-      noun: selectedNoun,
-      modifier: selectedModifier,
-      attributeValues: attributeInputs,
-      status: 0 // Draft
-    };
-
-    try {
-      const res = await fetch(`${API_BASE}/staging`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await safeParseResponse(res);
-      if (res.ok) {
-        showFeedback(
-          'success', 
-          'Draft Saved Successfully', 
-          `Draft Staged ID: ${data.id}. Unique ID: ${data.uniqueId || 'N/A'}`
-        );
-        resetForm();
-      } else {
-        showFeedback(
-          'danger', 
-          'Failed to Save Draft', 
-          data.message || 'Validation error saving draft.'
-        );
-      }
-    } catch (err) {
-      showFeedback('danger', 'Connection Error', 'Failed to reach API server.');
-    } finally {
-      setIsSubmitting(false);
+    if (selectedUser) {
+      onLogin(selectedUser);
     }
   };
-
-  // Submit Governance Request (Strict validation & De-duplication check)
-  const handleSubmitGovernance = async (e) => {
-    e.preventDefault();
-    if (!selectedNoun || !selectedModifier) return;
-
-    setIsSubmitting(true);
-    setFeedback(null);
-
-    const payload = {
-      noun: selectedNoun,
-      modifier: selectedModifier,
-      attributeValues: attributeInputs
-    };
-
-    try {
-      const res = await fetch(`${API_BASE}/governance/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await safeParseResponse(res);
-      if (res.ok) {
-        showFeedback(
-          'success', 
-          'Governance Request Submitted', 
-          `Material successfully validated, nomenclature generated, and staged as Pending. Unique ID: ${data.uniqueId}`
-        );
-        resetForm();
-      } else {
-        // Backend returns duplicate error message or validation errors
-        const detail = typeof data === 'string' ? data : (data.message || 'Governance submission rejected.');
-        const errorsList = data.errors || [];
-        showFeedback('danger', 'Submission Blocked', detail, errorsList);
-      }
-    } catch (err) {
-      showFeedback('danger', 'Connection Error', 'Failed to reach governance engine API.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Approve Pending Staging Item
-  const handleApprove = async (id) => {
-    setFeedback(null);
-    try {
-      const res = await fetch(`${API_BASE}/staging/${id}/approve`, {
-        method: 'POST'
-      });
-
-      const data = await safeParseResponse(res);
-      if (res.ok) {
-        showFeedback(
-          'success', 
-          'Golden Record Promoted', 
-          `Staging ID ${id} approved successfully and promoted to Production Catalog. Description: ${data.productionRecord.description}`
-        );
-        fetchStagingItems();
-      } else {
-        showFeedback(
-          'danger', 
-          'Approval Denied', 
-          data.message || 'Error occurred during material promotion.'
-        );
-      }
-    } catch (err) {
-      showFeedback('danger', 'Connection Error', 'Failed to connect to backend.');
-    }
-  };
-
-  // Helper to format attribute keys nicely
-  const formatAttrLabel = (str) => {
-    return str.replace(/_/g, ' ');
-  };
-
-  // Helper to get status badge class
-  const getStatusBadgeClass = (status) => {
-    switch (status) {
-      case 0: return 'status-badge-draft';
-      case 1: return 'status-badge-pending';
-      case 2: return 'status-badge-approved';
-      default: return '';
-    }
-  };
-
-  const getStatusText = (status) => {
-    switch (status) {
-      case 0: return 'Draft';
-      case 1: return 'Pending';
-      case 2: return 'Approved';
-      default: return 'Unknown';
-    }
-  };
-
-  // Unique list of Nouns & Modifiers filtered by selected Noun
-  const nounsList = [...new Set(templates.map(t => t.noun))];
-  const modifiersList = selectedNoun
-    ? [...new Set(templates.filter(t => t.noun.toUpperCase() === selectedNoun.toUpperCase()).map(t => t.modifier))]
-    : [];
 
   return (
-    <div className="dashboard-container">
-      {/* Header */}
-      <header className="dashboard-header">
-        <div className="brand-section">
-          <div className="logo-container">
-            <img 
-              src="https://hofinsoft.com/wp-content/uploads/2023/01/hofinsoft-new-logo.png" 
-              alt="Hofinsoft Technologies" 
-              className="brand-logo"
-            />
+    <div className="login-container">
+      <div className="login-card">
+        <div className="login-header">
+          <div className="login-logo">N</div>
+          <h2 className="login-title">NOMCAT</h2>
+          <span className="login-subtitle">Enterprise MDG Platform</span>
+        </div>
+
+        <form onSubmit={handleSignIn} className="login-form">
+          <label className="form-label" style={{ marginBottom: '-0.25rem' }}>Select Simulated Identity Role:</label>
+          <div className="login-role-grid">
+            {SIMULATED_USERS.map((user) => (
+              <div
+                key={user.id}
+                className={`login-role-card ${selectedUser?.id === user.id ? 'selected' : ''}`}
+                onClick={() => setSelectedUser(user)}
+              >
+                <span className="role-card-icon">{user.icon}</span>
+                <span className="role-card-title">{user.name}</span>
+                <span className="role-card-desc">{user.role.replace(/([A-Z])/g, ' $1').trim()}</span>
+              </div>
+            ))}
           </div>
-          <p className="brand-tagline">eNOMCAT — Gated Material Master Governance Portal</p>
-        </div>
-        <div className="system-status-pill">
-          <span className="status-dot"></span>
-          <span>MDG Core Active</span>
-        </div>
-      </header>
 
-      {/* Tabs */}
-      <nav className="tabs-navigation">
-        <button 
-          className={`tab-btn ${activeTab === 'cataloging' ? 'active' : ''}`}
-          onClick={() => setActiveTab('cataloging')}
-        >
-          ✍️ Item Cataloging
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'staging' ? 'active' : ''}`}
-          onClick={() => setActiveTab('staging')}
-        >
-          📋 Staging Board
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'production' ? 'active' : ''}`}
-          onClick={() => setActiveTab('production')}
-        >
-          🏆 Golden Records
-        </button>
-      </nav>
+          {selectedUser && (
+            <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border-primary)', padding: '0.75rem', borderRadius: '4px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+              <div><strong>Email:</strong> {selectedUser.email}</div>
+              <div style={{ marginTop: '2px' }}><strong>Access Scope:</strong> {selectedUser.desc}</div>
+            </div>
+          )}
 
-      {/* Notification Feedback Banners */}
-      {feedback && (
-        <div className={`alert-banner alert-banner-${feedback.type}`}>
-          <div>
-            <div className="alert-title">{feedback.title}</div>
-            <div className="alert-detail">{feedback.detail}</div>
-            {feedback.errors && feedback.errors.length > 0 && (
-              <ul className="alert-list">
-                {feedback.errors.map((err, idx) => (
-                  <li key={idx}>{err}</li>
-                ))}
-              </ul>
-            )}
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '0.7rem' }} disabled={!selectedUser}>
+            Sign In to MDG Workspace
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Approval Timeline Component ─────────────────────────────
+function ApprovalTimeline({ request }) {
+  if (!request) return null;
+  
+  let logData = [];
+  try {
+    logData = JSON.parse(request.approvalLog || "[]");
+  } catch (e) {
+    console.error("Error parsing approval log", e);
+  }
+
+  const isExtension = request.requestType === 'Plant_Extension';
+  const stagesList = isExtension 
+    ? [
+        { stage: 1, role: 'Requester', title: 'Requester Submission', desc: 'Material request registered' },
+        { stage: 2, role: 'Approver', title: 'Local Approver Review', desc: 'Plant-level review' },
+        { stage: 3, role: 'CentralCataloger', title: 'Central Cataloger Standardization', desc: 'Final classification review & catalog promotion' }
+      ]
+    : [
+        { stage: 1, role: 'Requester', title: 'Requester Submission', desc: 'Material request registered' },
+        { stage: 2, role: 'Approver', title: 'Local Approver Review', desc: 'Plant-level review' },
+        { stage: 3, role: 'CentralCataloger', title: 'Central Cataloger Review', desc: 'Standardizes nomenclature and attribute values' },
+        { stage: 4, role: 'CentralApprover', title: 'Central Approver Release', desc: 'Final authorization & promotion to Golden Master' }
+      ];
+
+  return (
+    <div className="timeline-container">
+      {stagesList.map((stg) => {
+        const logEntry = logData.find(entry => entry.Stage === stg.stage || entry.Role === stg.role);
+        
+        let statusClass = '';
+        let statusTitle = stg.title;
+        let timeString = '';
+        let comment = '';
+        let userName = '';
+
+        if (logEntry) {
+          statusClass = 'completed';
+          userName = logEntry.User || logEntry.ApprovedBy || 'System';
+          timeString = logEntry.Timestamp 
+            ? new Date(logEntry.Timestamp).toLocaleString() 
+            : new Date(request.createdAt).toLocaleString();
+          if (logEntry.Comment) comment = logEntry.Comment;
+          statusTitle += ` (${logEntry.Action || 'Approved'})`;
+        } else if (stg.stage === request.currentStage && request.approvalStatus !== 'Approved' && request.approvalStatus !== 'Rejected') {
+          statusClass = 'active';
+          statusTitle += ' — Active';
+          userName = `Pending with: ${stg.role === 'CentralCataloger' ? 'Cataloger' : stg.role}`;
+        } else {
+          userName = `Pending Stage ${stg.stage}`;
+        }
+
+        if (request.approvalStatus === 'Approved') {
+          statusClass = 'completed';
+          if (stg.stage === request.totalStages) {
+            timeString = new Date(request.updatedAt).toLocaleString();
+            userName = request.modifier || 'Central System';
+          }
+        }
+        
+        if (request.approvalStatus === 'Rejected' && stg.stage === request.currentStage) {
+          statusClass = 'rejected';
+          statusTitle += ' — Rejected';
+        }
+
+        return (
+          <div className="timeline-item" key={stg.stage}>
+            <div className={`timeline-badge ${statusClass}`} />
+            <div className="timeline-content">
+              <span className="timeline-title">{statusTitle}</span>
+              <span className="timeline-meta">
+                {userName} {timeString && `• ${timeString}`}
+              </span>
+              {comment && <div className="timeline-comment">💬 "{comment}"</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main App ────────────────────────────────────────────────
+function App() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    const saved = localStorage.getItem('nomcat_session');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [profiles, setProfiles] = useState([]);
+  const [summary, setSummary] = useState({});
+  const [requests, setRequests] = useState([]);
+  const [catalog, setCatalog] = useState([]);
+  const { toasts, addToast, dismissToast } = useToast();
+
+  // NomBot Chatbot State
+  const [isBotOpen, setIsBotOpen] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatLogs, setChatLogs] = useState([
+    { sender: 'bot', text: "👋 Hello! I'm **NomBot**, your Master Data Governance cataloging assistant. Ask me anything about our requests, golden records, or plant extensions." }
+  ]);
+  const [askingBot, setAskingBot] = useState(false);
+
+  // New Request Form state
+  const [selectedProfile, setSelectedProfile] = useState('');
+  const [requestType, setRequestType] = useState('Single');
+  const [plant, setPlant] = useState('PLT1');
+  const [priority, setPriority] = useState('Standard');
+  const [expectedDate, setExpectedDate] = useState('2024-05-10');
+  const [schema, setSchema] = useState(null);
+  const [attrValues, setAttrValues] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+
+  // Plant Extension - Search Golden Catalog
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showGoldenDropdown, setShowGoldenDropdown] = useState(false);
+  const [selectedGoldenRecord, setSelectedGoldenRecord] = useState(null);
+
+  // Bulk upload state
+  const [bulkResults, setBulkResults] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // User dropdown menu
+  const [showProfileDropdown, setShowProfileDropdown] = useState(false);
+
+  // Filters for Work Tray table view
+  const [wtSearch, setWtSearch] = useState('');
+  const [wtStatus, setWtStatus] = useState('');
+  const [wtPlant, setWtPlant] = useState('');
+  const [selectedRequest, setSelectedRequest] = useState(null);
+
+  // AI Assist state
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiClassifying, setAiClassifying] = useState(false);
+  const [aiResult, setAiResult] = useState(null);
+  const [similarityWarning, setSimilarityWarning] = useState(null);
+
+  // ─── AI Classification Handler ────────────────────────────
+  const handleAiClassify = async () => {
+    if (!aiDescription.trim()) return;
+    setAiClassifying(true);
+    setAiResult(null);
+    setSimilarityWarning(null);
+    try {
+      const res = await fetch(`${API}/ai/classify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ description: aiDescription })
+      });
+      if (res.status === 503) {
+        addToast('warning', 'AI Not Configured', 'Set GEMINI_API_KEY on the server to enable AI classification.');
+        setAiClassifying(false);
+        return;
+      }
+      if (!res.ok) {
+        addToast('error', 'Classification Failed', 'AI could not extract structured data from your description.');
+        setAiClassifying(false);
+        return;
+      }
+      const data = await res.json();
+      setAiResult(data);
+
+      // Auto-fill form fields from AI result
+      const profileKey = `${data.noun}|${data.modifier}`;
+      const matchingProfile = profiles.find(p => `${p.noun}|${p.modifier}` === profileKey);
+      if (matchingProfile) {
+        handleProfileChange(profileKey);
+        if (data.plant) setPlant(data.plant.toUpperCase());
+        // Auto-fill attributes after schema loads (small delay for async schema fetch)
+        setTimeout(() => {
+          if (data.attributes) {
+            setAttrValues(prev => ({ ...prev, ...data.attributes }));
+          }
+        }, 500);
+        addToast('success', 'AI Classification Complete', `Matched to ${data.noun}/${data.modifier} (${Math.round(data.confidence * 100)}% confidence)`);
+      } else {
+        addToast('warning', 'Profile Not Found', `AI suggested ${data.noun}/${data.modifier} but no matching profile exists in the system.`);
+      }
+    } catch (err) {
+      addToast('error', 'AI Error', err.message);
+    }
+    setAiClassifying(false);
+  };
+
+  // ─── AI Semantic Search Handler ────────────────────────────
+  const handleAiSearch = async (query) => {
+    if (!query || query.length < 3) return;
+    try {
+      const res = await fetch(`${API}/ai/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.length > 0) {
+          setSimilarityWarning(data);
+        }
+      }
+    } catch (err) {
+      console.error('Semantic search error:', err);
+    }
+  };
+
+  // ─── Authentication Handlers ─────────────────────────────
+  const handleLogin = (user) => {
+    setCurrentUser(user);
+    localStorage.setItem('nomcat_session', JSON.stringify(user));
+    addToast('success', 'Workspace Authenticated', `Logged in as ${user.name} (${user.role})`);
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('nomcat_session');
+    setShowProfileDropdown(false);
+  };
+
+  // ─── API Calls ───────────────────────────────────────────
+  const fetchProfiles = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API}/attributes/profiles`);
+      if (res.ok) setProfiles(await res.json());
+    } catch (e) { console.error('Failed to fetch profiles:', e); }
+  }, [currentUser]);
+
+  const fetchSummary = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API}/reporting/summary`);
+      if (res.ok) setSummary(await res.json());
+    } catch (e) { console.error('Failed to fetch summary:', e); }
+  }, [currentUser]);
+
+  const fetchRequests = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API}/requests`);
+      if (res.ok) setRequests(await res.json());
+    } catch (e) { console.error('Failed to fetch requests:', e); }
+  }, [currentUser]);
+
+  const fetchCatalog = useCallback(async () => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch(`${API}/catalog`);
+      if (res.ok) setCatalog(await res.json());
+    } catch (e) { console.error('Failed to fetch catalog:', e); }
+  }, [currentUser]);
+
+  const refreshAll = useCallback(() => {
+    fetchProfiles();
+    fetchSummary();
+    fetchRequests();
+    fetchCatalog();
+  }, [fetchProfiles, fetchSummary, fetchRequests, fetchCatalog]);
+
+  useEffect(() => { refreshAll(); }, [refreshAll]);
+
+  // ─── Profile/Schema Selection ────────────────────────────
+  const handleProfileChange = async (profileKey) => {
+    setSelectedProfile(profileKey);
+    setSchema(null);
+    setAttrValues({});
+
+    if (!profileKey) return;
+    const [noun, modifier] = profileKey.split('|');
+    try {
+      const res = await fetch(`${API}/attributes/schema?noun=${noun}&modifier=${modifier}`);
+      if (res.ok) {
+        const data = await res.json();
+        setSchema(data);
+        const initVals = {};
+        data.fields.forEach((f) => { initVals[f.attributeName] = ''; });
+        setAttrValues(initVals);
+      }
+    } catch (e) { console.error('Failed to fetch schema:', e); }
+  };
+
+  // ─── Plant Extension Golden Selection ─────────────────────
+  const handleSelectGoldenRecord = async (record) => {
+    setSelectedGoldenRecord(record);
+    setSearchQuery(`${record.materialNumber} - ${record.shortDescription}`);
+    setShowGoldenDropdown(false);
+    
+    // Load schema for this noun/modifier
+    const res = await fetch(`${API}/attributes/schema?noun=${record.noun}&modifier=${record.modifier}`);
+    if (res.ok) {
+      const data = await res.json();
+      setSchema(data);
+      // Pre-fill attributes from Golden Record
+      const values = JSON.parse(record.jsonAttributeValues);
+      setAttrValues(values);
+      setSelectedProfile(`${record.noun}|${record.modifier}`);
+    }
+  };
+
+  // ─── Submit Request ──────────────────────────────────────
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!schema) return;
+
+    let noun, modifier;
+    if (requestType === 'Plant_Extension') {
+      if (!selectedGoldenRecord) {
+        addToast('warning', 'Validation Warning', 'Please select an existing Golden Record to extend.');
+        return;
+      }
+      noun = selectedGoldenRecord.noun;
+      modifier = selectedGoldenRecord.modifier;
+    } else {
+      const parts = selectedProfile.split('|');
+      noun = parts[0];
+      modifier = parts[1];
+    }
+
+    setSubmitting(true);
+
+    try {
+      const res = await fetch(`${API}/requests/submit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          noun, modifier, requestType, plant,
+          attributes: attrValues,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        addToast('success', 'Request Created', `${data.requestRefNo} — ${data.shortDescription}`);
+        // Reset
+        setAttrValues({});
+        setSelectedProfile('');
+        setSchema(null);
+        setSelectedGoldenRecord(null);
+        setSearchQuery('');
+        refreshAll();
+        setActiveTab('workTray');
+      } else if (res.status === 409) {
+        addToast('warning', 'Duplication Blocked', data.message);
+      } else {
+        addToast('error', 'Submission Failed', typeof data === 'string' ? data : (data.message || data.title || JSON.stringify(data)));
+      }
+    } catch (e) {
+      addToast('error', 'Network Error', e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ─── Approve/Reject ──────────────────────────────────────
+  const handleApproval = async (requestId, action) => {
+    try {
+      const res = await fetch(`${API}/requests/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, action, role: currentUser.role }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        addToast('success',
+          action === 'Approve' ? 'Approved' : 'Rejected',
+          data.message || `Request ${action.toLowerCase()}d successfully.`
+        );
+        refreshAll();
+      } else {
+        addToast('error', 'Action Failed', typeof data === 'string' ? data : (data.message || data.title || JSON.stringify(data)));
+      }
+    } catch (e) {
+      addToast('error', 'Network Error', e.message);
+    }
+  };
+
+  // ─── Bulk Upload (Excel/CSV) ─────────────────────────────
+  const handleBulkFile = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    setBulkResults(null);
+
+    try {
+      const text = await file.text();
+      const lines = text.trim().split('\n');
+      if (lines.length < 2) {
+        addToast('error', 'Invalid File', 'File must have a header row and at least one data row.');
+        setUploading(false);
+        return;
+      }
+
+      const headers = lines[0].split(',').map((h) => h.trim());
+      const nounIdx = headers.findIndex((h) => h.toLowerCase() === 'noun');
+      const modIdx = headers.findIndex((h) => h.toLowerCase() === 'modifier');
+      const typeIdx = headers.findIndex((h) => h.toLowerCase() === 'request_type' || h.toLowerCase() === 'requesttype');
+      const plantIdx = headers.findIndex((h) => h.toLowerCase() === 'plant');
+
+      if (nounIdx === -1 || modIdx === -1) {
+        addToast('error', 'Invalid Format', 'CSV must have Noun and Modifier columns.');
+        setUploading(false);
+        return;
+      }
+
+      const attrHeaders = headers.filter((_, i) => i !== nounIdx && i !== modIdx && i !== typeIdx && i !== plantIdx);
+      const items = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+        if (cols.length < 2) continue;
+
+        const attributes = {};
+        attrHeaders.forEach((ah) => {
+          const idx = headers.indexOf(ah);
+          if (idx !== -1 && cols[idx]) attributes[ah] = cols[idx];
+        });
+
+        items.push({
+          noun: cols[nounIdx],
+          modifier: cols[modIdx],
+          requestType: typeIdx !== -1 ? cols[typeIdx] || 'Single' : 'Single',
+          plant: plantIdx !== -1 ? cols[plantIdx] || 'PLT1' : 'PLT1',
+          attributes,
+        });
+      }
+
+      const res = await fetch(`${API}/requests/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items }),
+      });
+
+      const data = await res.json();
+      setBulkResults(data);
+
+      if (data.successful > 0) {
+        addToast('success', 'Bulk Upload Complete', `${data.successful} item(s) created, ${data.duplicates} duplicate(s) flagged.`);
+      } else {
+        addToast('warning', 'Bulk Upload', `${data.duplicates} duplicate(s) flagged. ${data.errors} error(s).`);
+      }
+      refreshAll();
+    } catch (e) {
+      addToast('error', 'Upload Error', e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    handleBulkFile(file);
+  };
+
+  // ─── Download CSV Template ───────────────────────────────
+  const downloadTemplate = () => {
+    const csv = 'Noun,Modifier,Request_Type,Plant,Inside_Diameter,Outside_Diameter,Material,Type,Thread,Length\nBEARING,BALL,Single,PLT1,20MM,32MM,STEEL,,,\nBOLT,STUD,Single,PLT1,,,,HEX,M12x1.75,100MM,ALLOY STEEL\nBEARING,BALL,Plant_Extension,PLT2,20MM,32MM,STEEL,,,';
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'nomcat_bulk_template.csv'; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // ─── NomBot Chat Interaction ─────────────────────────────
+  const askNomBot = async (msgText) => {
+    const query = msgText || chatMessage;
+    if (!query.trim()) return;
+
+    setChatLogs((prev) => [...prev, { sender: 'user', text: query }]);
+    setChatMessage('');
+    setAskingBot(true);
+
+    try {
+      const res = await fetch(`${API}/nombot/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: query }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setChatLogs((prev) => [...prev, { sender: 'bot', text: data.reply }]);
+      } else {
+        setChatLogs((prev) => [...prev, { sender: 'bot', text: "Sorry, I ran into an issue connecting to the chat service." }]);
+      }
+    } catch (e) {
+      setChatLogs((prev) => [...prev, { sender: 'bot', text: `Connection error: ${e.message}` }]);
+    } finally {
+      setAskingBot(false);
+    }
+  };
+
+  // Filtered golden list for search dropdown
+  const filteredGolden = catalog.filter((c) =>
+    c.materialNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    c.shortDescription.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Filtered Work Tray staging requests
+  const filteredRequests = requests.filter((r) => {
+    const matchesSearch = r.requestRefNo.toLowerCase().includes(wtSearch.toLowerCase()) ||
+                          r.shortDescription.toLowerCase().includes(wtSearch.toLowerCase());
+    const matchesStatus = wtStatus === '' || r.approvalStatus === wtStatus;
+    const matchesPlant = wtPlant === '' || r.plant.toLowerCase() === wtPlant.toLowerCase();
+    return matchesSearch && matchesStatus && matchesPlant;
+  });
+
+  // Calculate dynamic metrics for dashboard
+  const approvedRate = summary.totalRequests > 0 
+    ? Math.round((summary.approved / summary.totalRequests) * 100)
+    : 0;
+  const duplicatePreventionRate = summary.totalRequests > 0 
+    ? Math.round((summary.duplicated / summary.totalRequests) * 100)
+    : 0;
+
+  // Calculate live plant distribution for bar chart
+  const plantCounts = {};
+  catalog.forEach(item => {
+    const p = item.plant || 'PLT1';
+    plantCounts[p] = (plantCounts[p] || 0) + 1;
+  });
+  
+  const sortedPlants = Object.entries(plantCounts)
+    .map(([plantCode, count]) => ({ plantCode, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 4);
+
+  if (sortedPlants.length === 0) {
+    sortedPlants.push(
+      { plantCode: 'PLT1', count: 0 },
+      { plantCode: 'PLT2', count: 0 }
+    );
+  }
+  
+  const maxCount = Math.max(...sortedPlants.map(p => p.count), 1);
+
+
+  // If not logged in, show login page
+  if (!currentUser) {
+    return (
+      <>
+        <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+        <Login onLogin={handleLogin} />
+      </>
+    );
+  }
+
+  // Initials for avatar icon
+  const getInitials = (name) => {
+    return name.split(' ').map((n) => n[0]).join('');
+  };
+
+  const getFormattedRole = (role) => {
+    return role === 'CentralCataloger' ? 'Cataloger' : role.replace(/([A-Z])/g, ' $1').trim();
+  };
+
+  // ─── RENDER ──────────────────────────────────────────────
+  return (
+    <>
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* ═══ LEFT SIDEBAR NAVIGATION ═══ */}
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="sidebar-logo">N</div>
+          <div className="sidebar-brand-text">
+            <span className="sidebar-title">NOMCAT</span>
+            <span className="sidebar-subtitle">Material Cataloging</span>
           </div>
         </div>
-      )}
+        <div className="sidebar-menu">
+          <button className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+            <span className="sidebar-icon">📊</span> Dashboard
+          </button>
+          <button className={`sidebar-item ${activeTab === 'catalog' ? 'active' : ''}`} onClick={() => setActiveTab('catalog')}>
+            <span className="sidebar-icon">🏆</span> Material Catalog
+          </button>
+          <button className={`sidebar-item ${activeTab === 'workTray' ? 'active' : ''}`} onClick={() => setActiveTab('workTray')}>
+            <span className="sidebar-icon">📋</span> Work Tray
+          </button>
+          <button className={`sidebar-item ${activeTab === 'newRequest' ? 'active' : ''}`} onClick={() => setActiveTab('newRequest')}>
+            <span className="sidebar-icon">📝</span> New Request
+          </button>
+          <button className={`sidebar-item ${activeTab === 'bulkUpload' ? 'active' : ''}`} onClick={() => setActiveTab('bulkUpload')}>
+            <span className="sidebar-icon">📤</span> Bulk Import
+          </button>
+          <button className={`sidebar-item ${activeTab === 'reporting' ? 'active' : ''}`} onClick={() => setActiveTab('reporting')}>
+            <span className="sidebar-icon">📈</span> Reporting
+          </button>
+        </div>
+      </aside>
 
-      {/* Tab Contents */}
-      {activeTab === 'cataloging' && (
-        <div className="dashboard-grid">
-          {/* Item Creation Form */}
-          <div className="glass-panel">
-            <h2 className="panel-title">Item Cataloging Form</h2>
-            <form onSubmit={e => e.preventDefault()}>
-              <div className="form-group">
-                <label className="form-label">Noun</label>
-                <select 
-                  className="form-select"
-                  value={selectedNoun}
-                  onChange={e => setSelectedNoun(e.target.value)}
-                >
-                  <option value="">-- Choose Noun --</option>
-                  {nounsList.map((noun, idx) => (
-                    <option key={idx} value={noun}>{noun}</option>
-                  ))}
-                </select>
+      {/* ═══ MAIN WORKSPACE WRAPPER ═══ */}
+      <div className="main-wrapper">
+        
+        {/* Top Header Row */}
+        <header className="header">
+          <div className="header-left">
+            <div className="global-search">
+              <span className="global-search-icon">🔍</span>
+              <input type="text" className="global-search-input" placeholder="Global Search..." />
+            </div>
+          </div>
+          <div className="header-right">
+            <button className="header-action-btn" title="Notifications">🔔</button>
+            <button className="header-action-btn" title="Help/Knowledge Center">❓</button>
+            
+            {/* Centered Avatar User Card */}
+            <div className="header-user-profile" onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
+              <div className="user-avatar" style={{ backgroundColor: currentUser.avatarColor }}>
+                {getInitials(currentUser.name)}
+              </div>
+              <div className="user-info">
+                <span className="user-name">{currentUser.name}</span>
+                <span className="user-role-label">{getFormattedRole(currentUser.role)}</span>
+              </div>
+              <span style={{ fontSize: '0.55rem', color: 'var(--text-secondary)', marginLeft: '1px' }}>▼</span>
+              
+              {showProfileDropdown && (
+                <div className="profile-dropdown-menu">
+                  <button type="button" className="dropdown-action-btn" onClick={handleLogout}>
+                    🚪 Sign Out
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {/* main content area */}
+        <main className={`main-content ${isBotOpen ? 'nombot-open' : ''}`}>
+
+          {/* TAB: DASHBOARD (WASBOARD VIEW) */}
+          {activeTab === 'dashboard' && (
+            <div className="washboard-grid">
+              
+              {/* Card 1: Catalog Overview */}
+              <div className="washboard-card">
+                <div className="card-header-washboard">
+                  <span>Catalog Overview</span>
+                  <span>🏆</span>
+                </div>
+                <div className="catalog-overview-stats">
+                  <div className="overview-stat-item">
+                    <span className="overview-stat-value">{summary.goldenRecords || 0}</span>
+                    <span className="overview-stat-label">Golden Records</span>
+                  </div>
+                  <div className="overview-stat-item">
+                    <span className="overview-stat-value">{profiles.length || 0}</span>
+                    <span className="overview-stat-label">Template Profiles</span>
+                  </div>
+                </div>
+                <span className="washboard-badge" style={{ color: 'var(--color-success)', borderColor: 'rgba(16,185,129,0.2)' }}>
+                  Active Governance Enabled
+                </span>
               </div>
 
-              <div className="form-group">
-                <label className="form-label">Modifier</label>
-                <select 
-                  className="form-select"
-                  value={selectedModifier}
-                  onChange={e => setSelectedModifier(e.target.value)}
-                  disabled={!selectedNoun}
-                >
-                  <option value="">-- Choose Modifier --</option>
-                  {modifiersList.map((mod, idx) => (
-                    <option key={idx} value={mod}>{mod}</option>
-                  ))}
-                </select>
+              {/* Card 2: Search Catalog */}
+              <div className="washboard-card search-box">
+                <div className="card-header-washboard">
+                  <span>Search Catalog Inventory</span>
+                  <span>🔍</span>
+                </div>
+                <div className="washboard-search-box">
+                  <input
+                    type="text"
+                    className="form-input search-input"
+                    placeholder="Search by Material ID or short desc..."
+                    value={searchQuery}
+                    onFocus={() => setShowGoldenDropdown(true)}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      setShowGoldenDropdown(true);
+                    }}
+                  />
+                  {showGoldenDropdown && searchQuery && (
+                    <div className="dropdown-results" style={{ width: '100%' }}>
+                      {filteredGolden.length === 0 ? (
+                        <div style={{ padding: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>No matches.</div>
+                      ) : (
+                        filteredGolden.map((rec) => (
+                          <div key={rec.id} className="dropdown-item" onClick={() => {
+                            setSearchQuery(rec.materialNumber);
+                            setShowGoldenDropdown(false);
+                            addToast('info', 'Record Detail', `${rec.materialNumber} - ${rec.shortDescription}`);
+                          }} style={{ fontSize: '0.72rem' }}>
+                            <strong>{rec.materialNumber}</strong> ({rec.plant}) — {rec.shortDescription}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => {
+                    setShowGoldenDropdown(false);
+                    setSearchQuery('');
+                  }}>Clear Search</button>
+                </div>
               </div>
 
-              {/* Dynamic Field Generator */}
-              {activeTemplate && (
-                <div className="dynamic-fields-section">
-                  <h3 className="dynamic-fields-title">
-                    🔧 Dynamic Schema: {activeTemplate.noun} {activeTemplate.modifier}
-                  </h3>
-                  {activeTemplate.requiredAttributes.map((attr, idx) => (
-                    <div className="form-group" key={idx}>
-                      <label className="form-label">{formatAttrLabel(attr)}</label>
-                      <input 
-                        type="text"
-                        className="form-input"
-                        placeholder={`Enter ${formatAttrLabel(attr)}...`}
-                        value={attributeInputs[attr] || ''}
-                        onChange={e => handleAttributeChange(attr, e.target.value)}
-                      />
+              {/* Card 3: Recent Activity (Live Ingestion Stream) */}
+              <div className="washboard-card">
+                <div className="card-header-washboard">
+                  <span>Live Staging Stream</span>
+                  <span>⚡</span>
+                </div>
+                <div className="washboard-activity-list">
+                  {requests.length === 0 ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                      No staging requests logged yet.
+                    </div>
+                  ) : (
+                    requests.slice(0, 3).map((req) => (
+                      <div className="activity-item" key={req.id}>
+                        <span className={`activity-dot ${req.approvalStatus === 'Approved' ? '' : 'orange'}`}></span>
+                        <div className="activity-text">
+                          <strong>{req.requestRefNo} ({req.plant})</strong>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.68rem', marginTop: '1px' }}>
+                            {req.noun} / {req.modifier}
+                          </div>
+                        </div>
+                        <span className="activity-time" style={{ marginLeft: 'auto' }}>
+                          <StatusBadge status={req.approvalStatus} />
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* Card 4: Dynamic Governance Metrics */}
+              <div className="washboard-card two-thirds">
+                <div className="card-header-washboard">
+                  <span>Dynamic Governance Metrics</span>
+                  <span>📊</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div className="washboard-progress-item">
+                    <div className="progress-header">
+                      <span>Staging Approval Acceptance Rate</span>
+                      <span>{approvedRate}%</span>
+                    </div>
+                    <div className="progress-bar-bg">
+                      <div className="progress-bar-fill" style={{ width: `${approvedRate}%` }}></div>
+                    </div>
+                  </div>
+                  <div className="washboard-progress-item">
+                    <div className="progress-header">
+                      <span>Duplicate Prevention Block Rate</span>
+                      <span>{duplicatePreventionRate}%</span>
+                    </div>
+                    <div className="progress-bar-bg">
+                      <div className="progress-bar-fill purple" style={{ width: `${duplicatePreventionRate}%` }}></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Card 5: Plant Material Density Bar Chart */}
+              <div className="washboard-card">
+                <div className="card-header-washboard">
+                  <span>Plant Material Density</span>
+                  <span>📈</span>
+                </div>
+                <div className="chart-container">
+                  {sortedPlants.map((p) => (
+                    <div className="chart-bar-group" key={p.plantCode}>
+                      <div className="chart-bar-fill" style={{ height: `${(p.count / maxCount) * 80 + 10}px` }}></div>
+                      <span className="chart-bar-label" style={{ fontSize: '0.62rem', fontWeight: 600 }}>{p.plantCode}</span>
+                      <span style={{ fontSize: '0.58rem', color: 'var(--text-secondary)', marginTop: '-2px' }}>{p.count} items</span>
                     </div>
                   ))}
                 </div>
-              )}
-
-              {/* Buttons */}
-              <div className="btn-group">
-                <button 
-                  type="button" 
-                  className={`btn btn-secondary ${isSubmitting || !activeTemplate ? 'btn-disabled' : ''}`}
-                  onClick={handleSubmitDraft}
-                  disabled={isSubmitting || !activeTemplate}
-                >
-                  📁 Save as Draft
-                </button>
-                <button 
-                  type="submit" 
-                  className={`btn btn-primary ${isSubmitting || !activeTemplate ? 'btn-disabled' : ''}`}
-                  onClick={handleSubmitGovernance}
-                  disabled={isSubmitting || !activeTemplate}
-                >
-                  🚀 Submit Governance
-                </button>
+                <button className="template-link" style={{ alignSelf: 'flex-end', fontSize: '0.65rem' }} onClick={() => setActiveTab('catalog')}>View Golden Catalog →</button>
               </div>
-            </form>
-          </div>
 
-          {/* Guide Panel */}
-          <div className="glass-panel">
-            <h2 className="panel-title">Governance Info</h2>
-            <div className="info-card">
-              <div className="info-row">
-                <span className="info-label">Active Schema Profiles</span>
-                <span className="info-value">{templates.length}</span>
+            </div>
+          )}
+
+          {/* TAB: MATERIAL CATALOG (GOLDEN CATALOG) */}
+          {activeTab === 'catalog' && (
+            <div className="worktray-table-container">
+              <div className="worktray-table-title">
+                <span>🏆 Golden Master Catalog Records</span>
+                <span className="lifecycle-label">{catalog.length} Active record(s)</span>
               </div>
-              <div className="info-row">
-                <span className="info-label">Sample Profile (Seeded)</span>
-                <span className="info-value code-badge">BEARING BALL</span>
+              <div className="data-table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Material Number</th>
+                      <th>Noun</th>
+                      <th>Modifier</th>
+                      <th>Plant</th>
+                      <th>Standardized Description</th>
+                      <th>Source Request</th>
+                      <th>Cataloged Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {catalog.map((rec) => (
+                      <tr key={rec.id}>
+                        <td style={{ fontWeight: 600, color: 'var(--color-success)' }}>{rec.materialNumber}</td>
+                        <td>{rec.noun}</td>
+                        <td>{rec.modifier}</td>
+                        <td style={{ fontWeight: 600, color: '#6366f1' }}>{rec.plant}</td>
+                        <td style={{ fontFamily: 'monospace' }}>{rec.shortDescription}</td>
+                        <td>{rec.sourceRequestRef}</td>
+                        <td>{new Date(rec.approvedAt).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <div style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-              <p style={{ marginBottom: '0.75rem' }}>
-                💡 <strong>Dynamic Field Generator:</strong> Selecting <strong>Noun: BEARING</strong> and <strong>Modifier: BALL</strong> fetches metadata from the SQLite data dictionary and dynamically displays input fields for the required attributes.
-              </p>
-              <p style={{ marginBottom: '0.75rem' }}>
-                📁 <strong>Draft submissions</strong> skip strict attribute validation, allowing catalogers to save partial details for future editing.
-              </p>
-              <p>
-                🚀 <strong>Governance submissions</strong> enforce full schema compliance, generate standardized descriptions, and block duplicate entries.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {activeTab === 'staging' && (
-        <div className="glass-panel">
-          <h2 className="panel-title">Staging Item Requests Board</h2>
-          {loading.staging ? (
-            <div className="empty-state">Loading staging requests...</div>
-          ) : stagingItems.length === 0 ? (
-            <div className="empty-state">
-              <h3>No items in staging</h3>
-              <p>Go to the Item Cataloging tab to submit drafts or governance requests.</p>
-            </div>
-          ) : (
-            <div className="grid-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Unique ID</th>
-                    <th>Noun</th>
-                    <th>Modifier</th>
-                    <th>Attribute Values</th>
-                    <th>Nomenclature Description</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stagingItems.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.id}</td>
-                      <td>
-                        <span className="code-badge">{item.uniqueId || 'Generating...'}</span>
-                      </td>
-                      <td style={{ fontWeight: '600' }}>{item.noun}</td>
-                      <td>{item.modifier}</td>
-                      <td>
-                        <div className="attributes-tags">
-                          {Object.entries(item.attributeValues).map(([key, val]) => (
-                            <span key={key} className="attr-tag">
-                              <strong>{formatAttrLabel(key)}:</strong> {val || 'n/a'}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>
-                        {item.description || 'Draft (No nomenclature generated)'}
-                      </td>
-                      <td>
-                        <span className={`status-badge ${getStatusBadgeClass(item.status)}`}>
-                          {getStatusText(item.status)}
-                        </span>
-                      </td>
-                      <td>
-                        {item.status === 1 ? (
-                          <button 
-                            className="btn btn-success"
-                            onClick={() => handleApprove(item.id)}
+          {/* TAB: WORK TRAY (MATERIAL STAGING QUEUE) */}
+          {activeTab === 'workTray' && (
+            <div className="createrequest-container">
+              <div className="worktray-header-row">
+                <div className="worktray-title-block">
+                  <h2>Work Tray - Material Staging</h2>
+                </div>
+                <div className="worktray-controls">
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Search staging queue..."
+                    value={wtSearch}
+                    onChange={(e) => setWtSearch(e.target.value)}
+                    style={{ maxWidth: '180px' }}
+                  />
+                  <select
+                    className="form-select"
+                    value={wtStatus}
+                    onChange={(e) => setWtStatus(e.target.value)}
+                    style={{ maxWidth: '140px' }}
+                  >
+                    <option value="">All Statuses</option>
+                    <option value="Stage1_Validated">Stage1 Validated</option>
+                    <option value="In_Progress">In Progress</option>
+                    <option value="Approved">Approved</option>
+                    <option value="Rejected">Rejected</option>
+                  </select>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Filter by Plant..."
+                    value={wtPlant}
+                    onChange={(e) => setWtPlant(e.target.value)}
+                    style={{ maxWidth: '120px' }}
+                  />
+                  <button className="btn btn-outline" style={{ padding: '0.4rem 0.85rem' }} onClick={() => setActiveTab('newRequest')}>Submit to NMSR</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: selectedRequest ? '1.1fr 0.9fr' : '1fr', gap: '1.25rem', alignItems: 'start' }}>
+                
+                {/* Left Side: Staging Table */}
+                <div className="worktray-table-container">
+                  <div className="worktray-table-title">
+                    <span>Material Staging Queue</span>
+                    <button className="btn btn-outline btn-sm" onClick={refreshAll} style={{ padding: '0.2rem 0.5rem' }}>↻ Refresh</button>
+                  </div>
+
+                  <div className="data-table-wrapper">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}><span className="custom-checkbox"></span></th>
+                          <th>REF ↑</th>
+                          <th>NOUN</th>
+                          <th>MODIFIER</th>
+                          <th>PLANT</th>
+                          <th>PIPELINE</th>
+                          <th>STATUS</th>
+                          <th>ACTIONS</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredRequests.map((req) => (
+                          <tr
+                            key={req.id}
+                            onClick={() => setSelectedRequest(req)}
+                            style={{ cursor: 'pointer', background: selectedRequest?.id === req.id ? 'rgba(79, 70, 229, 0.08)' : '' }}
                           >
-                            ✔️ Approve
-                          </button>
-                        ) : (
-                          <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                            {item.status === 2 ? 'Promoted' : 'Draft'}
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                            <td><span className="custom-checkbox"></span></td>
+                            <td style={{ fontWeight: 600 }}>{req.requestRefNo}</td>
+                            <td>{req.noun}</td>
+                            <td>{req.modifier}</td>
+                            <td style={{ color: '#818cf8', fontWeight: 600 }}>{req.plant}</td>
+                            <td>
+                              {req.requestType === 'Plant_Extension' ? 'Plant Extension (3-Stage)' : 'Standard Pipeline (4-Stage)'}
+                            </td>
+                            <td><StatusBadge status={req.approvalStatus} /></td>
+                            <td>
+                              {req.approvalStatus !== 'Approved' && req.approvalStatus !== 'Rejected' && req.approvalStatus !== 'Duplicated' ? (
+                                <div className="btn-group" onClick={(e) => e.stopPropagation()}>
+                                  <button className="btn-approve-outline" onClick={() => handleApproval(req.id, 'Approve')}>Approve</button>
+                                  <button className="btn-reject-outline" onClick={() => handleApproval(req.id, 'Reject')}>Reject</button>
+                                </div>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)' }}>—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
 
-      {activeTab === 'production' && (
-        <div className="glass-panel">
-          <h2 className="panel-title">Production Golden Records Catalog</h2>
-          {loading.production ? (
-            <div className="empty-state">Loading golden records...</div>
-          ) : productionItems.length === 0 ? (
-            <div className="empty-state">
-              <h3>No production golden records</h3>
-              <p>Approve pending staging items on the Staging Board to promote them here.</p>
-            </div>
-          ) : (
-            <div className="grid-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Unique ID</th>
-                    <th>Noun</th>
-                    <th>Modifier</th>
-                    <th>Attribute Specifications</th>
-                    <th>Standardized Nomenclature</th>
-                    <th>Approved At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {productionItems.map((item) => (
-                    <tr key={item.id}>
-                      <td>{item.id}</td>
-                      <td>
-                        <span className="code-badge" style={{ borderColor: 'var(--status-approved)', color: '#34d399' }}>
-                          {item.uniqueId}
-                        </span>
-                      </td>
-                      <td style={{ fontWeight: '600' }}>{item.noun}</td>
-                      <td>{item.modifier}</td>
-                      <td>
-                        <div className="attributes-tags">
-                          {Object.entries(item.attributeValues).map(([key, val]) => (
-                            <span key={key} className="attr-tag" style={{ background: 'rgba(52, 211, 153, 0.05)' }}>
-                              <strong>{formatAttrLabel(key)}:</strong> {val}
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td style={{ fontStyle: 'italic', color: '#e2e8f0', fontSize: '0.85rem' }}>
-                        {item.description}
-                      </td>
-                      <td style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                        {new Date(item.approvedAt).toLocaleString()}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  {/* Table Pagination row */}
+                  <div className="table-pagination-row">
+                    <span>1-{filteredRequests.length} of {filteredRequests.length} items</span>
+                    <div className="pagination-controls">
+                      <button className="pagination-btn">&lt;</button>
+                      <button className="pagination-btn active">1</button>
+                      <button className="pagination-btn">&gt;</button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Side: Selected Request Details & Timeline Drawer */}
+                {selectedRequest && (
+                  <div className="request-details-drawer">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-primary)', paddingBottom: '0.5rem' }}>
+                      <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fff' }}>📋 Request Details</h3>
+                      <button onClick={() => setSelectedRequest(null)} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.25rem', padding: '0 0.25rem' }}>×</button>
+                    </div>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.74rem' }}>
+                      <div><strong>Reference Number:</strong> <span style={{ color: '#818cf8', fontWeight: 600 }}>{selectedRequest.requestRefNo}</span></div>
+                      <div><strong>Plant Assignment:</strong> <span style={{ color: '#10b981', fontWeight: 600 }}>{selectedRequest.plant}</span></div>
+                      <div><strong>Request Type:</strong> {selectedRequest.requestType.replace(/_/g, ' ')}</div>
+                      <div><strong>Nomenclature description:</strong></div>
+                      <div className="preview-desc-text" style={{ fontSize: '0.72rem', marginTop: '2px' }}>{selectedRequest.shortDescription}</div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <div className="form-section-title-centered" style={{ margin: '0.25rem 0', fontSize: '0.65rem' }}>Attributes values</div>
+                      <div style={{ maxHeight: '110px', overflowY: 'auto', background: 'var(--bg-input)', padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-primary)' }}>
+                        {Object.entries(JSON.parse(selectedRequest.jsonAttributeValues || "{}")).map(([k, v]) => (
+                          <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', borderBottom: '1px solid var(--border-subtle)', padding: '0.2rem 0' }}>
+                            <span style={{ color: 'var(--text-secondary)' }}>{k.replace(/_/g, ' ')}:</span>
+                            <strong style={{ color: '#fff' }}>{v}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <div className="form-section-title-centered" style={{ margin: '0.25rem 0', fontSize: '0.65rem' }}>Approval Audit Trail</div>
+                      <ApprovalTimeline request={selectedRequest} />
+                    </div>
+                  </div>
+                )}
+
+              </div>
             </div>
           )}
-        </div>
-      )}
-    </div>
+
+          {/* TAB: NEW REQUEST */}
+          {activeTab === 'newRequest' && (
+            <div className="createrequest-container">
+              <div className="form-two-columns">
+                
+                {/* Left Side: Create Form */}
+                <div className="form-section-card">
+                  
+                  {/* AI Assist Panel */}
+                  <div className="ai-assist-panel">
+                    <div className="ai-assist-header">
+                      <span>🤖 AI Smart Classification</span>
+                      {aiResult && (
+                        <span className={`confidence-badge ${aiResult.confidence >= 0.9 ? 'high' : aiResult.confidence >= 0.7 ? 'medium' : 'low'}`}>
+                          {Math.round(aiResult.confidence * 100)}% confidence
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      className="ai-assist-textarea"
+                      placeholder="Describe the material you need in plain language... e.g. 'I need a 12mm inner diameter steel ball bearing for plant 2'"
+                      value={aiDescription}
+                      onChange={(e) => setAiDescription(e.target.value)}
+                    />
+                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn-ai"
+                        onClick={handleAiClassify}
+                        disabled={aiClassifying || !aiDescription.trim()}
+                      >
+                        {aiClassifying ? (
+                          <><span className="ai-thinking"><span></span><span></span><span></span></span> Classifying...</>
+                        ) : (
+                          <>🧠 Classify with AI</>
+                        )}
+                      </button>
+                      {aiResult && (
+                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+                          Mapped to <strong style={{ color: '#a78bfa' }}>{aiResult.noun}/{aiResult.modifier}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Similarity Warning */}
+                  {similarityWarning && similarityWarning.length > 0 && (
+                    <div className="similarity-warning">
+                      <div className="similarity-warning-header">
+                        ⚠️ Similar materials found in Golden Catalog
+                      </div>
+                      {similarityWarning.slice(0, 3).map((item, idx) => (
+                        <div className="similarity-item" key={idx}>
+                          <span><strong>{item.materialNumber}</strong> — {item.shortDescription}</span>
+                          <span className="similarity-score">{Math.round(item.similarity * 100)}%</span>
+                        </div>
+                      ))}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => { setSimilarityWarning(null); setRequestType('Plant_Extension'); }}>
+                          Use Plant Extension
+                        </button>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => setSimilarityWarning(null)}>
+                          Proceed Anyway
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="form-section-title-centered">Noun/Modifier Definition</div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Noun <span className="mandatory">*</span></label>
+                    <select className="form-select-aligned" value={selectedProfile} onChange={(e) => handleProfileChange(e.target.value)} required>
+                      <option value="">— Select Classification —</option>
+                      {profiles.map((p) => (
+                        <option key={`${p.noun}|${p.modifier}`} value={`${p.noun}|${p.modifier}`}>{p.noun}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Modifier <span className="mandatory">*</span></label>
+                    <select className="form-select-aligned" value={selectedProfile} onChange={(e) => handleProfileChange(e.target.value)} required>
+                      <option value="">— Select Modifier —</option>
+                      {profiles.map((p) => (
+                        <option key={`${p.noun}|${p.modifier}`} value={`${p.noun}|${p.modifier}`}>{p.modifier}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="form-section-title-centered">Request Details</div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Request Type <span className="mandatory">*</span></label>
+                    <select className="form-select-aligned" value={requestType} onChange={(e) => {
+                      setRequestType(e.target.value);
+                      setSelectedProfile('');
+                      setSchema(null);
+                      setAttrValues({});
+                      setSelectedGoldenRecord(null);
+                      setSearchQuery('');
+                    }}>
+                      <option value="Single">Single Catalog Item</option>
+                      <option value="Multiple">Multiple Items Ingestion</option>
+                      <option value="Modification">Modification</option>
+                      <option value="Plant_Extension">Plant Specific Extension</option>
+                    </select>
+                  </div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Priority</label>
+                    <select className="form-select-aligned" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                      <option value="Standard">Standard</option>
+                      <option value="Urgent">Urgent</option>
+                    </select>
+                  </div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Expected Date</label>
+                    <input type="date" className="form-input-aligned" value={expectedDate} onChange={(e) => setExpectedDate(e.target.value)} />
+                  </div>
+                  <div className="form-row-aligned">
+                    <label className="form-label-aligned">Target Plant <span className="mandatory">*</span></label>
+                    <input type="text" className="form-input-aligned" value={plant} onChange={(e) => setPlant(e.target.value.toUpperCase())} required />
+                  </div>
+
+                  {requestType === 'Plant_Extension' && (
+                    <div className="form-row-aligned search-box" style={{ gridTemplateColumns: '140px 180px' }}>
+                      <label className="form-label-aligned">Search Active <span className="mandatory">*</span></label>
+                      <div style={{ position: 'relative', width: '100%' }}>
+                        <input
+                          className="form-input-aligned"
+                          type="text"
+                          placeholder="Search MAT-..."
+                          value={searchQuery}
+                          onFocus={() => setShowGoldenDropdown(true)}
+                          onChange={(e) => {
+                            setSearchQuery(e.target.value);
+                            setShowGoldenDropdown(true);
+                          }}
+                        />
+                        {showGoldenDropdown && searchQuery && (
+                          <div className="dropdown-results" style={{ width: '180px' }}>
+                            {filteredGolden.length === 0 ? (
+                              <div style={{ padding: '0.4rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>No match.</div>
+                            ) : (
+                              filteredGolden.map((rec) => (
+                                <div key={rec.id} className="dropdown-item" onClick={() => handleSelectGoldenRecord(rec)} style={{ fontSize: '0.72rem' }}>
+                                  {rec.materialNumber} ({rec.plant})
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {schema && (
+                    <>
+                      <div className="form-section-title-centered">Part Attributes</div>
+                      {schema.fields.map((field) => (
+                        <div className="form-row-aligned" key={field.attributeName}>
+                          <label className="form-label-aligned">
+                            {field.attributeName.replace(/_/g, ' ')}
+                            {field.isMandatory && <span className="mandatory">*</span>}
+                          </label>
+                          <input
+                            className="form-input-aligned"
+                            type="text"
+                            placeholder={requestType === 'Plant_Extension' ? 'N/A' : `Enter ${field.attributeName.replace(/_/g, ' ').toLowerCase()}`}
+                            value={attrValues[field.attributeName] || ''}
+                            readOnly={requestType === 'Plant_Extension'}
+                            disabled={requestType === 'Plant_Extension'}
+                            onChange={(e) => setAttrValues((prev) => ({ ...prev, [field.attributeName]: e.target.value }))}
+                            required={field.isMandatory && requestType !== 'Plant_Extension'}
+                          />
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  
+                  <div className="form-actions-aligned">
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => {
+                      setSelectedProfile(''); setSchema(null); setAttrValues({}); setSelectedGoldenRecord(null); setSearchQuery('');
+                    }}>Cancel</button>
+                    <button type="submit" className="btn btn-primary btn-sm" onClick={handleSubmit} disabled={!schema || submitting}>
+                      Submit Request
+                    </button>
+                  </div>
+                </div>
+
+                {/* Right Side: Description Preview Card */}
+                <div className="form-section-card">
+                  <div className="form-section-title-centered" style={{ border: 'none' }}>Generated Description Preview</div>
+                  <div className="preview-image-box">📦</div>
+                  
+                  <div className="preview-row-aligned">
+                    <span className="preview-row-label-aligned">Generated Noun:</span>
+                    <span className="preview-row-value-aligned">{selectedProfile ? selectedProfile.split('|')[0] : 'BEARING'}</span>
+                  </div>
+                  <div className="preview-row-aligned">
+                    <span className="preview-row-label-aligned">Generated Modifier:</span>
+                    <span className="preview-row-value-aligned">{selectedProfile ? selectedProfile.split('|')[1] : 'BALL'}</span>
+                  </div>
+                  
+                  <div className="preview-formatted-title">Formatted Description:</div>
+                  <div className="preview-formatted-block">
+                    {schema ? (
+                      <>
+                        {selectedProfile.split('|')[0]}, {selectedProfile.split('|')[1]}
+                        {Object.entries(attrValues).filter(([, v]) => v.trim()).map(([k, v]) => (
+                          <span key={k}>: {v.toUpperCase()}</span>
+                        ))}
+                      </>
+                    ) : 'BEARING, BALL: 12: 15: STEEL'}
+                  </div>
+                  
+                  <button type="button" className="btn-preview-refresh">↻ Refresh Preview</button>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* TAB: BULK UPLOAD */}
+          {activeTab === 'bulkUpload' && (
+            <div className="panel">
+              <div className="panel-header">
+                <div className="panel-title">📤 Excel / CSV Bulk Materials Import</div>
+                <button className="template-link" onClick={downloadTemplate}>⬇ Download Template</button>
+              </div>
+              <div className="panel-body">
+                <div
+                  className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
+                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragLeave={() => setDragOver(false)}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📁</div>
+                  <div style={{ fontWeight: 600, color: '#fff' }}>
+                    {uploading ? 'Checking Governance rules...' : 'Drop CSV file here or browse locally'}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv"
+                    style={{ display: 'none' }}
+                    onChange={(e) => handleBulkFile(e.target.files[0])}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: REPORTING */}
+          {activeTab === 'reporting' && (
+            <div className="panel">
+              <div className="panel-header">
+                <div className="panel-title">📊 Reporting Metrics</div>
+                <button className="btn btn-primary btn-sm" onClick={() => window.open(`${API}/reporting/staging-export`, '_blank')}>
+                  📥 Export Staging Grid (CSV)
+                </button>
+              </div>
+              <div className="panel-body">
+                <div className="catalog-overview-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                  <div className="stat-card">
+                    <span className="stat-value indigo">{summary.totalRequests || 0}</span>
+                    <span className="stat-label">Registrations</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-value emerald">{summary.approved || 0}</span>
+                    <span className="stat-label">Approved Records</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-value red">{summary.duplicated || 0}</span>
+                    <span className="stat-label">Duplications Blocked</span>
+                  </div>
+                  <div className="stat-card">
+                    <span className="stat-value cyan">{summary.exports || 0}</span>
+                    <span className="stat-label">Bridge Exports Logged</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </main>
+
+        {/* 🤖 NOMBOT CHAT LOG PANEL (SLIDE OUT) 🤖 */}
+        {isBotOpen && (
+          <aside className="nombot-panel">
+            <div className="nombot-header">
+              <div className="nombot-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>Chat Log <span className="ai-powered-badge">✨ Gemini AI</span></div>
+              <button style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '1.25rem' }} onClick={() => setIsBotOpen(false)}>×</button>
+            </div>
+            
+            <div className="nombot-body">
+              {/* Chat Log User Info details */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-primary)', marginBottom: '0.5rem' }}>
+                <div style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#3b82f6', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: '0.75rem' }}>NB</div>
+                <div style={{ display: 'flex', flexDirection: 'column', lineStyle: '1.1' }}>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#fff' }}>NomBot</span>
+                  <span style={{ fontSize: '0.55rem', color: 'var(--color-success)' }}>Catalog Assistant (Online)</span>
+                </div>
+              </div>
+
+              <div className="nombot-messages">
+                {chatLogs.map((log, i) => (
+                  <div key={i} className={`chat-bubble ${log.sender}`}>
+                    {renderMarkdown(log.text)}
+                  </div>
+                ))}
+                {askingBot && (
+                  <div className="chat-bubble bot"><span className="ai-thinking"><span></span><span></span><span></span></span> Thinking...</div>
+                )}
+              </div>
+
+              <div className="nombot-chips">
+                <button className="nombot-chip" onClick={() => askNomBot("Give me a pipeline summary")}>📊 Pipeline Summary</button>
+                <button className="nombot-chip" onClick={() => askNomBot("Show golden master catalog records")}>🏆 Golden Catalog</button>
+                <button className="nombot-chip" onClick={() => askNomBot("Explain plant extension")}>💡 Plant Extension</button>
+                <button className="nombot-chip" onClick={() => askNomBot("What governance rules apply to duplicate materials?")}>🔍 Dedup Rules</button>
+              </div>
+            </div>
+
+            <div className="nombot-footer">
+              <form className="nombot-form" onSubmit={(e) => { e.preventDefault(); askNomBot(); }}>
+                <input
+                  className="form-input"
+                  type="text"
+                  placeholder="Type your message..."
+                  value={chatMessage}
+                  onChange={(e) => setChatMessage(e.target.value)}
+                />
+                <button type="submit" className="btn btn-primary btn-sm" disabled={askingBot}>Send</button>
+              </form>
+            </div>
+          </aside>
+        )}
+
+      </div>
+
+      {/* Floating NomBot Toggle Button */}
+      <button className="nombot-toggle-btn" onClick={() => setIsBotOpen(!isBotOpen)} title="Open Chat Log">
+        {isBotOpen ? '💬' : '🤖'}
+      </button>
+    </>
   );
 }
 

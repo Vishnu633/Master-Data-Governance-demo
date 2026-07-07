@@ -9,7 +9,8 @@ Publish/
 *.userosscache
 *.sln.docstates
 
-# SQLite DB lock and temporary files (Keep mdg.db for pre-seeded quickstart)
+# SQLite DB files
+*.db
 *.db-shm
 *.db-wal
 
