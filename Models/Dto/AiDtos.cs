@@ -21,4 +21,16 @@ namespace Hofinsoft.Mdg.Models.Dto
     {
         public string Query { get; set; } = "";
     }
+
+    public class AiAuditRequest
+    {
+        public string Noun { get; set; } = "";
+        public string Modifier { get; set; } = "";
+        public Dictionary<string, string> Attributes { get; set; } = new();
+    }
+
+    public class AiBulkCleanRequest
+    {
+        public List<string> Descriptions { get; set; } = new();
+    }
 }

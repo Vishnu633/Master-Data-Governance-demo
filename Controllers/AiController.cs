@@ -10,6 +10,8 @@ using Hofinsoft.Mdg.Services;
 using Hofinsoft.Mdg.Models;
 using Hofinsoft.Mdg.Models.Dto;
 using Microsoft.Extensions.Logging;
+using Microsoft.AspNetCore.Http;
+using System.IO;
 
 namespace Hofinsoft.Mdg.Controllers
 {
@@ -191,6 +193,188 @@ namespace Hofinsoft.Mdg.Controllers
             {
                 _logger.LogError(ex, "Error in AI semantic search endpoint");
                 return StatusCode(500, "An internal error occurred during semantic search.");
+            }
+        }
+
+        [HttpPost("classify-image")]
+        public async Task<IActionResult> ClassifyImage(IFormFile file)
+        {
+            if (!_gemini.IsConfigured)
+            {
+                return StatusCode(503, new { error = "AI service not configured. Set GEMINI_API_KEY environment variable." });
+            }
+
+            if (file == null || file.Length == 0)
+            {
+                return BadRequest("No image file provided.");
+            }
+
+            try
+            {
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+                var imageBytes = ms.ToArray();
+
+                var profiles = await _db.AttributeMaster
+                    .Select(a => new { a.Noun, a.Modifier })
+                    .Distinct()
+                    .ToListAsync();
+                var profileStrings = profiles.Select(p => $"{p.Noun}/{p.Modifier}").ToList();
+
+                var aiResult = await _gemini.ClassifyMaterialImageAsync(imageBytes, file.ContentType, profileStrings);
+                if (aiResult == null)
+                {
+                    return UnprocessableEntity("AI failed to classify image into a profile.");
+                }
+
+                aiResult.Noun = aiResult.Noun.Trim().ToUpper();
+                aiResult.Modifier = aiResult.Modifier.Trim().ToUpper();
+
+                var profileExists = profiles.Any(p => p.Noun == aiResult.Noun && p.Modifier == aiResult.Modifier);
+                if (!profileExists)
+                {
+                    _logger.LogWarning("AI image classified as {Noun}/{Modifier} but it is not seeded in database.", aiResult.Noun, aiResult.Modifier);
+                    return UnprocessableEntity($"AI suggested classification {aiResult.Noun}/{aiResult.Modifier} which does not exist.");
+                }
+
+                var dbAttributes = await _db.AttributeMaster
+                    .Where(a => a.Noun == aiResult.Noun && a.Modifier == aiResult.Modifier)
+                    .Select(a => a.AttributeName)
+                    .ToListAsync();
+
+                var normalizedAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var dbAttr in dbAttributes)
+                {
+                    var matchedKey = aiResult.Attributes.Keys.FirstOrDefault(k => IsAttributeMatch(k, dbAttr, dbAttributes));
+                    if (matchedKey != null)
+                    {
+                        normalizedAttributes[dbAttr] = aiResult.Attributes[matchedKey];
+                    }
+                    else
+                    {
+                        normalizedAttributes[dbAttr] = "";
+                    }
+                }
+                aiResult.Attributes = normalizedAttributes;
+
+                var shortDesc = _descEngine.GenerateShortDescription(aiResult.Noun, aiResult.Modifier, aiResult.Attributes);
+                aiResult.GeneratedDescription = shortDesc;
+
+                return Ok(aiResult);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AI material image classification endpoint");
+                return StatusCode(500, "An internal error occurred during image classification.");
+            }
+        }
+
+        [HttpPost("audit")]
+        public async Task<IActionResult> Audit([FromBody] AiAuditRequest request)
+        {
+            if (!_gemini.IsConfigured)
+            {
+                return StatusCode(503, new { error = "AI service not configured." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.Noun) || string.IsNullOrWhiteSpace(request.Modifier))
+            {
+                return BadRequest("Noun and Modifier cannot be empty.");
+            }
+
+            try
+            {
+                var auditReport = await _gemini.AuditMaterialAsync(request.Noun, request.Modifier, request.Attributes);
+                return Ok(new { auditReport });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AI material audit endpoint");
+                return StatusCode(500, "An internal error occurred during auditing.");
+            }
+        }
+
+        [HttpPost("bulk-clean")]
+        public async Task<IActionResult> BulkClean([FromBody] AiBulkCleanRequest request)
+        {
+            if (!_gemini.IsConfigured)
+            {
+                return StatusCode(503, new { error = "AI service not configured." });
+            }
+
+            if (request.Descriptions == null || request.Descriptions.Count == 0)
+            {
+                return BadRequest("No legacy descriptions provided.");
+            }
+
+            try
+            {
+                var profiles = await _db.AttributeMaster
+                    .Select(a => new { a.Noun, a.Modifier })
+                    .Distinct()
+                    .ToListAsync();
+                var profileStrings = profiles.Select(p => $"{p.Noun}/{p.Modifier}").ToList();
+
+                var rawResults = await _gemini.BulkCleanMaterialsAsync(request.Descriptions, profileStrings);
+                var finalResults = new List<AiClassificationResult>();
+
+                foreach (var aiResult in rawResults)
+                {
+                    try
+                    {
+                        aiResult.Noun = aiResult.Noun.Trim().ToUpper();
+                        aiResult.Modifier = aiResult.Modifier.Trim().ToUpper();
+
+                        var matchedProfile = profiles.FirstOrDefault(p => p.Noun == aiResult.Noun && p.Modifier == aiResult.Modifier);
+                        if (matchedProfile == null)
+                        {
+                            matchedProfile = profiles.FirstOrDefault(p => 
+                                string.Equals(p.Noun, aiResult.Noun, StringComparison.OrdinalIgnoreCase) && 
+                                string.Equals(p.Modifier, aiResult.Modifier, StringComparison.OrdinalIgnoreCase));
+                        }
+
+                        if (matchedProfile != null)
+                        {
+                            aiResult.Noun = matchedProfile.Noun;
+                            aiResult.Modifier = matchedProfile.Modifier;
+
+                            var dbAttributes = await _db.AttributeMaster
+                                .Where(a => a.Noun == aiResult.Noun && a.Modifier == aiResult.Modifier)
+                                .Select(a => a.AttributeName)
+                                .ToListAsync();
+
+                            var normalizedAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                            foreach (var dbAttr in dbAttributes)
+                            {
+                                var matchedKey = aiResult.Attributes.Keys.FirstOrDefault(k => IsAttributeMatch(k, dbAttr, dbAttributes));
+                                if (matchedKey != null)
+                                {
+                                    normalizedAttributes[dbAttr] = aiResult.Attributes[matchedKey];
+                                }
+                                else
+                                {
+                                    normalizedAttributes[dbAttr] = "";
+                                }
+                            }
+                            aiResult.Attributes = normalizedAttributes;
+
+                            var shortDesc = _descEngine.GenerateShortDescription(aiResult.Noun, aiResult.Modifier, aiResult.Attributes);
+                            aiResult.GeneratedDescription = shortDesc;
+
+                            finalResults.Add(aiResult);
+                        }
+                    }
+                    catch
+                    {
+                        // Skip unparseable results in bulk
+                    }
+                }
+
+                return Ok(finalResults);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error in AI bulk clean endpoint");
             }
         }
 

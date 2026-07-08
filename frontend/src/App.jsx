@@ -375,6 +375,42 @@ function App() {
   const [aiResult, setAiResult] = useState(null);
   const [similarityWarning, setSimilarityWarning] = useState(null);
 
+  // AI Multimodal & Audit states
+  const [imageFile, setImageFile] = useState(null);
+  const [imageClassifying, setImageClassifying] = useState(false);
+  const [imagePreview, setImagePreview] = useState(null);
+  const [auditReport, setAuditReport] = useState(null);
+  const [auditing, setAuditing] = useState(false);
+
+  // AI Bulk Cleansing states
+  const [rawDescriptions, setRawDescriptions] = useState('');
+  const [cleansing, setCleansing] = useState(false);
+  const [cleansedPreview, setCleansedPreview] = useState(null);
+
+  // Real-time similarity check debounced effect
+  useEffect(() => {
+    if (!selectedProfile || Object.keys(attrValues).length === 0 || requestType === 'Plant_Extension') {
+      setSimilarityWarning(null);
+      return;
+    }
+
+    const filledValues = Object.values(attrValues).filter(v => typeof v === 'string' && v.trim() !== '');
+    if (filledValues.length === 0) {
+      setSimilarityWarning(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      const [noun, modifier] = selectedProfile.split('|');
+      const queryStr = `${noun} ${modifier} ${Object.entries(attrValues)
+        .map(([k, v]) => `${k}:${v}`)
+        .join(' ')}`;
+      handleAiSearch(queryStr);
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [attrValues, selectedProfile, requestType]);
+
   // ─── AI Classification Handler ────────────────────────────
   const handleAiClassify = async () => {
     if (!aiDescription.trim()) return;
@@ -400,13 +436,11 @@ function App() {
       const data = await res.json();
       setAiResult(data);
 
-      // Auto-fill form fields from AI result
       const profileKey = `${data.noun}|${data.modifier}`;
       const matchingProfile = profiles.find(p => `${p.noun}|${p.modifier}` === profileKey);
       if (matchingProfile) {
         handleProfileChange(profileKey);
         if (data.plant) setPlant(data.plant.toUpperCase());
-        // Auto-fill attributes after schema loads (small delay for async schema fetch)
         setTimeout(() => {
           if (data.attributes) {
             setAttrValues(prev => ({ ...prev, ...data.attributes }));
@@ -422,6 +456,151 @@ function App() {
     setAiClassifying(false);
   };
 
+  // ─── AI Image Classification Handler ───────────────────────
+  const handleImageClassify = async () => {
+    if (!imageFile) return;
+    setImageClassifying(true);
+    setAiResult(null);
+    setSimilarityWarning(null);
+
+    const formData = new FormData();
+    formData.append('file', imageFile);
+
+    try {
+      const res = await fetch(`${API}/ai/classify-image`, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (res.status === 503) {
+        addToast('warning', 'AI Not Configured', 'Set GEMINI_API_KEY to enable AI image classification.');
+        setImageClassifying(false);
+        return;
+      }
+      if (!res.ok) {
+        addToast('error', 'Classification Failed', 'AI could not classify the image of this part.');
+        setImageClassifying(false);
+        return;
+      }
+
+      const data = await res.json();
+      setAiResult(data);
+
+      const profileKey = `${data.noun}|${data.modifier}`;
+      const matchingProfile = profiles.find(p => `${p.noun}|${p.modifier}` === profileKey);
+      if (matchingProfile) {
+        handleProfileChange(profileKey);
+        if (data.plant) setPlant(data.plant.toUpperCase());
+        setTimeout(() => {
+          if (data.attributes) {
+            setAttrValues(prev => ({ ...prev, ...data.attributes }));
+          }
+        }, 500);
+        addToast('success', 'Image Classification Complete', `Matched to ${data.noun}/${data.modifier}`);
+      } else {
+        addToast('warning', 'Profile Not Found', `AI suggested ${data.noun}/${data.modifier} but no matching profile exists.`);
+      }
+    } catch (err) {
+      addToast('error', 'AI Image Error', err.message);
+    }
+    setImageClassifying(false);
+  };
+
+  // ─── AI Data Auditor Steward Handler ───────────────────────
+  const handleAiAudit = async () => {
+    if (!selectedProfile) return;
+    setAuditing(true);
+    setAuditReport(null);
+
+    const [noun, modifier] = selectedProfile.split('|');
+    try {
+      const res = await fetch(`${API}/ai/audit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          noun,
+          modifier,
+          attributes: attrValues
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setAuditReport(data.auditReport);
+        addToast('success', 'AI Audit Complete', 'Governance specifications verified.');
+      } else {
+        addToast('error', 'Audit Failed', 'Could not run AI audit.');
+      }
+    } catch (e) {
+      addToast('error', 'AI Audit Error', e.message);
+    }
+    setAuditing(false);
+  };
+
+  // ─── AI Bulk Cleansing Handlers ────────────────────────────
+  const handleBulkClean = async () => {
+    if (!rawDescriptions.trim()) return;
+    setCleansing(true);
+    setCleansedPreview(null);
+
+    const descriptions = rawDescriptions.split('\n').map(d => d.trim()).filter(d => d.length > 0);
+    try {
+      const res = await fetch(`${API}/ai/bulk-clean`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ descriptions })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setCleansedPreview(data);
+        addToast('success', 'AI Cleansing Complete', `Successfully cleansed and parsed ${data.length} materials.`);
+      } else {
+        addToast('error', 'Cleansing Failed', 'AI could not clean the legacy descriptions.');
+      }
+    } catch (e) {
+      addToast('error', 'AI Cleansing Error', e.message);
+    }
+    setCleansing(false);
+  };
+
+  const handleSubmitCleansed = async () => {
+    if (!cleansedPreview || cleansedPreview.length === 0) return;
+    setUploading(true);
+
+    try {
+      const items = cleansedPreview.map(item => ({
+        noun: item.noun,
+        modifier: item.modifier,
+        requestType: 'Single',
+        plant: item.plant || 'PLT1',
+        attributes: item.attributes
+      }));
+
+      const res = await fetch(`${API}/requests/bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      });
+
+      const data = await res.json();
+      setBulkResults(data);
+      setCleansedPreview(null);
+      setRawDescriptions('');
+
+      if (data.successful > 0) {
+        addToast('success', 'Staging Ingested', `Successfully imported ${data.successful} cleansed materials to staging.`);
+      } else {
+        addToast('warning', 'Bulk Import Result', `Duplicates: ${data.duplicates}, Errors: ${data.errors}`);
+      }
+      refreshAll();
+    } catch (e) {
+      addToast('error', 'Submission Error', e.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   // ─── AI Semantic Search Handler ────────────────────────────
   const handleAiSearch = async (query) => {
     if (!query || query.length < 3) return;
@@ -435,6 +614,8 @@ function App() {
         const data = await res.json();
         if (data && data.length > 0) {
           setSimilarityWarning(data);
+        } else {
+          setSimilarityWarning(null);
         }
       }
     } catch (err) {
@@ -1643,43 +1824,77 @@ function App() {
                 <div className="form-section-card">
                   
                   {/* AI Assist Panel */}
-                  <div className="ai-assist-panel">
+                  <div className="ai-assist-panel" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                     <div className="ai-assist-header">
-                      <span>🤖 AI Smart Classification</span>
+                      <span>🤖 AI Smart Assist</span>
                       {aiResult && (
                         <span className={`confidence-badge ${aiResult.confidence >= 0.9 ? 'high' : aiResult.confidence >= 0.7 ? 'medium' : 'low'}`}>
                           {Math.round(aiResult.confidence * 100)}% confidence
                         </span>
                       )}
                     </div>
-                    <textarea
-                      className="ai-assist-textarea"
-                      placeholder="Describe the material you need in plain language... e.g. 'I need a 12mm inner diameter steel ball bearing for plant 2'"
-                      value={aiDescription}
-                      onChange={(e) => setAiDescription(e.target.value)}
-                    />
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        className="btn-ai"
-                        onClick={handleAiClassify}
-                        disabled={aiClassifying || !aiDescription.trim()}
-                      >
-                        {aiClassifying ? (
-                          <><span className="ai-thinking"><span></span><span></span><span></span></span> Classifying...</>
-                        ) : (
-                          <>🧠 Classify with AI</>
-                        )}
-                      </button>
-                      {aiResult && (
-                        <span style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
-                          Mapped to <strong style={{ color: '#a78bfa' }}>{aiResult.noun}/{aiResult.modifier}</strong>
-                        </span>
-                      )}
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', fontWeight: 600 }}>Option A: Describe Material</div>
+                        <textarea
+                          className="ai-assist-textarea"
+                          placeholder="Describe in plain language... e.g. '12mm ID steel ball bearing for plant 2'"
+                          value={aiDescription}
+                          onChange={(e) => setAiDescription(e.target.value)}
+                          style={{ height: '70px', resize: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          className="btn-ai"
+                          onClick={handleAiClassify}
+                          disabled={aiClassifying || !aiDescription.trim()}
+                          style={{ width: '100%', marginTop: '0.4rem', fontSize: '0.68rem' }}
+                        >
+                          {aiClassifying ? 'Classifying...' : '🧠 Classify Text'}
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', marginBottom: '0.25rem', fontWeight: 600 }}>Option B: Upload Photo / Image</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', flex: 1, justifyContent: 'center', alignItems: 'center', border: '1px dashed var(--border-primary)', borderRadius: '6px', padding: '0.4rem', background: 'rgba(255,255,255,0.01)', minHeight: '70px', cursor: 'pointer', position: 'relative' }} onClick={() => document.getElementById('image-upload-input').click()}>
+                          {imagePreview ? (
+                            <img src={imagePreview} alt="Preview" style={{ maxHeight: '60px', borderRadius: '4px', maxWidth: '100%', objectFit: 'contain' }} />
+                          ) : (
+                            <>
+                              <span style={{ fontSize: '1.2rem' }}>📷</span>
+                              <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textAlign: 'center' }}>Choose Photo / Upload</span>
+                            </>
+                          )}
+                          <input
+                            id="image-upload-input"
+                            type="file"
+                            accept="image/*"
+                            onChange={(e) => {
+                              const file = e.target.files[0];
+                              if (file) {
+                                setImageFile(file);
+                                setImagePreview(URL.createObjectURL(file));
+                              }
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ display: 'none' }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="btn-ai"
+                          onClick={handleImageClassify}
+                          disabled={imageClassifying || !imageFile}
+                          style={{ width: '100%', marginTop: '0.4rem', fontSize: '0.68rem' }}
+                        >
+                          {imageClassifying ? 'Analyzing Image...' : '📷 Classify Image'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Similarity Warning */}
+                   {/* Similarity Warning */}
                   {similarityWarning && similarityWarning.length > 0 && (
                     <div className="similarity-warning">
                       <div className="similarity-warning-header">
@@ -1687,12 +1902,21 @@ function App() {
                       </div>
                       {similarityWarning.slice(0, 3).map((item, idx) => (
                         <div className="similarity-item" key={idx}>
-                          <span><strong>{item.materialNumber}</strong> — {item.shortDescription}</span>
+                          <span><strong>{item.materialNumber}</strong> ({item.plant}) — {item.shortDescription}</span>
                           <span className="similarity-score">{Math.round(item.similarity * 100)}%</span>
                         </div>
                       ))}
                       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                        <button type="button" className="btn btn-outline btn-sm" onClick={() => { setSimilarityWarning(null); setRequestType('Plant_Extension'); }}>
+                        <button type="button" className="btn btn-outline btn-sm" onClick={() => {
+                          const highestMatch = similarityWarning[0];
+                          const matchRec = catalog.find(c => c.materialNumber === highestMatch.materialNumber);
+                          if (matchRec) {
+                            handleSelectGoldenRecord(matchRec);
+                            setRequestType('Plant_Extension');
+                            addToast('info', 'Requisition Recommendation', `Switched to Plant Extension for ${matchRec.materialNumber}`);
+                          }
+                          setSimilarityWarning(null);
+                        }}>
                           Use Plant Extension
                         </button>
                         <button type="button" className="btn btn-outline btn-sm" onClick={() => setSimilarityWarning(null)}>
@@ -1850,38 +2074,187 @@ function App() {
                   <button type="button" className="btn-preview-refresh">↻ Refresh Preview</button>
                 </div>
 
+                {/* AI Audit Report Card */}
+                {selectedProfile && schema && (
+                  <div className="form-section-card" style={{ marginTop: '1.25rem' }}>
+                    <div className="ai-assist-header" style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, color: '#fff', fontSize: '0.74rem' }}>🛡️ AI Data Steward Audit</span>
+                      <button
+                        type="button"
+                        className="btn-ai"
+                        onClick={handleAiAudit}
+                        disabled={auditing}
+                        style={{ fontSize: '0.65rem', padding: '0.2rem 0.6rem', marginTop: 0 }}
+                      >
+                        {auditing ? 'Auditing...' : 'Run AI Audit'}
+                      </button>
+                    </div>
+
+                    {auditReport ? (
+                      <div
+                        className="audit-report-box"
+                        style={{
+                          fontSize: '0.7rem',
+                          lineHeight: '1.35',
+                          background: 'rgba(99, 102, 241, 0.05)',
+                          border: '1px solid rgba(99, 102, 241, 0.2)',
+                          borderRadius: '4px',
+                          padding: '0.6rem',
+                          maxHeight: '150px',
+                          overflowY: 'auto',
+                          color: '#e2e8f0',
+                          whiteSpace: 'pre-line'
+                        }}
+                      >
+                        {auditReport}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>
+                        No audit report run yet. Click 'Run AI Audit' to evaluate metadata quality.
+                      </div>
+                    )}
+                  </div>
+                )}
+
               </div>
             </div>
           )}
 
           {/* TAB: BULK UPLOAD */}
           {activeTab === 'bulkUpload' && (
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">📤 Excel / CSV Bulk Materials Import</div>
-                <button className="template-link" onClick={downloadTemplate}>⬇ Download Template</button>
-              </div>
-              <div className="panel-body">
-                <div
-                  className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-                  onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>📁</div>
-                  <div style={{ fontWeight: 600, color: '#fff' }}>
-                    {uploading ? 'Checking Governance rules...' : 'Drop CSV file here or browse locally'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
+              
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '1.25rem' }}>
+                
+                {/* Left Card: File Upload */}
+                <div className="panel" style={{ height: 'fit-content' }}>
+                  <div className="panel-header">
+                    <div className="panel-title">📤 CSV Import</div>
+                    <button className="template-link" style={{ fontSize: '0.65rem' }} onClick={downloadTemplate}>⬇ Template</button>
                   </div>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv"
-                    style={{ display: 'none' }}
-                    onChange={(e) => handleBulkFile(e.target.files[0])}
-                  />
+                  <div className="panel-body" style={{ padding: '1rem' }}>
+                    <div
+                      className={`upload-zone ${dragOver ? 'drag-over' : ''}`}
+                      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={handleDrop}
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{ padding: '2rem 1rem' }}
+                    >
+                      <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📁</div>
+                      <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.74rem', textAlign: 'center' }}>
+                        {uploading ? 'Processing CSV...' : 'Drop CSV or Browse'}
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".csv"
+                        style={{ display: 'none' }}
+                        onChange={(e) => handleBulkFile(e.target.files[0])}
+                      />
+                    </div>
+                  </div>
                 </div>
+
+                {/* Right Card: AI Cleanser */}
+                <div className="panel">
+                  <div className="panel-header">
+                    <div className="panel-title">✨ AI Legacy Description Cleanser</div>
+                    <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>Standardize free text items</span>
+                  </div>
+                  <div className="panel-body" style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                    <textarea
+                      placeholder="Paste legacy material descriptions here (one per line)...&#10;e.g.&#10;BRG BAL 25*52 ST FOR PLT3&#10;GATE VALVE 2IN FLG WCB"
+                      value={rawDescriptions}
+                      onChange={(e) => setRawDescriptions(e.target.value)}
+                      style={{
+                        width: '100%',
+                        height: '100px',
+                        background: 'var(--bg-input)',
+                        color: '#fff',
+                        border: '1px solid var(--border-primary)',
+                        borderRadius: '4px',
+                        padding: '0.6rem',
+                        fontSize: '0.74rem',
+                        fontFamily: 'monospace',
+                        resize: 'vertical'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-ai"
+                      onClick={handleBulkClean}
+                      disabled={cleansing || !rawDescriptions.trim()}
+                      style={{ alignSelf: 'flex-start', marginTop: 0 }}
+                    >
+                      {cleansing ? 'Cleansing & Standardizing...' : '✨ Clean & Standardize descriptions'}
+                    </button>
+
+                    {cleansedPreview && cleansedPreview.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginTop: '0.25rem' }}>
+                        <div style={{ fontSize: '0.74rem', fontWeight: 600, color: '#fff' }}>Preview Cleansed Materials ({cleansedPreview.length})</div>
+                        <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--border-primary)', borderRadius: '4px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.68rem', textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--border-primary)' }}>
+                                <th style={{ padding: '0.4rem' }}>Noun/Mod</th>
+                                <th style={{ padding: '0.4rem' }}>Plant</th>
+                                <th style={{ padding: '0.4rem' }}>Standardized Description</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cleansedPreview.map((item, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                  <td style={{ padding: '0.4rem', fontWeight: 600, color: '#fff' }}>{item.noun} / {item.modifier}</td>
+                                  <td style={{ padding: '0.4rem', color: 'var(--text-secondary)' }}>{item.plant}</td>
+                                  <td style={{ padding: '0.4rem', color: 'var(--color-success)' }}>{item.generatedDescription}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', alignSelf: 'flex-end' }}>
+                          <button type="button" className="btn btn-outline btn-sm" onClick={() => setCleansedPreview(null)}>Discard</button>
+                          <button type="button" className="btn btn-primary btn-sm" onClick={handleSubmitCleansed} disabled={uploading}>
+                            {uploading ? 'Importing...' : 'Confirm & Import to Staging'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
               </div>
+
+              {/* Bulk import results (Errors/Duplicates summary) */}
+              {bulkResults && (
+                <div className="panel" style={{ padding: '1rem', marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#fff' }}>Bulk Import Result Report</div>
+                    <button className="btn btn-outline btn-xs" onClick={() => setBulkResults(null)}>Dismiss</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginTop: '0.5rem', fontSize: '0.72rem' }}>
+                    <div style={{ background: 'rgba(16, 185, 129, 0.05)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                      <span style={{ color: 'var(--color-success)', fontWeight: 700 }}>{bulkResults.successful}</span> Ingested to Staging
+                    </div>
+                    <div style={{ background: 'rgba(239, 68, 68, 0.05)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
+                      <span style={{ color: 'var(--color-danger)', fontWeight: 700 }}>{bulkResults.duplicates}</span> Duplicates Flagged
+                    </div>
+                    <div style={{ background: 'rgba(245, 158, 11, 0.05)', padding: '0.5rem', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                      <span style={{ color: 'var(--color-warning)', fontWeight: 700 }}>{bulkResults.errors}</span> Validation Failures
+                    </div>
+                    <div style={{ background: 'rgba(255,255,255,0.02)', padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border-primary)' }}>
+                      Total Parsed: <span style={{ fontWeight: 700 }}>{bulkResults.totalProcessed}</span>
+                    </div>
+                  </div>
+                  {bulkResults.errorMessages && bulkResults.errorMessages.length > 0 && (
+                    <div style={{ marginTop: '0.6rem', maxHeight: '100px', overflowY: 'auto', background: 'rgba(0,0,0,0.1)', padding: '0.4rem', borderRadius: '4px', fontSize: '0.62rem', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
+                      {bulkResults.errorMessages.map((m, idx) => <div key={idx}>• {m}</div>)}
+                    </div>
+                  )}
+                </div>
+              )}
+
             </div>
           )}
 
