@@ -5,6 +5,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Hofinsoft.Mdg.Models.Dto;
 
@@ -18,14 +19,14 @@ namespace Hofinsoft.Mdg.Services
 
         public bool IsConfigured => !string.IsNullOrEmpty(_apiKey);
 
-        public GeminiService(HttpClient client, ILogger<GeminiService> logger)
+        public GeminiService(HttpClient client, IConfiguration configuration, ILogger<GeminiService> logger)
         {
             _client = client;
             _logger = logger;
-            _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+            _apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY") ?? configuration["Gemini:ApiKey"];
             if (string.IsNullOrEmpty(_apiKey))
             {
-                _logger.LogWarning("GEMINI_API_KEY environment variable is not set. AI services will be disabled.");
+                _logger.LogWarning("Gemini API key is not configured. Set GEMINI_API_KEY environment variable or Gemini:ApiKey configuration.");
             }
         }
 
