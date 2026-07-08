@@ -3,12 +3,56 @@ import './App.css';
 
 const API = 'http://localhost:5181/api';
 
+// ─── Clean Vector SVG Icons ────────────────────────
+const DashboardIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+);
+const CatalogIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+);
+const WorkTrayIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+);
+const NewRequestIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M12 5v14M5 12h14"/></svg>
+);
+const BulkImportIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+);
+const ReportingIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+);
+const SearchIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+);
+const BellIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+);
+const HelpIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3M12 17h.01"/></svg>
+);
+const RobotIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4M8 16h.01M16 16h.01"/></svg>
+);
+const CloseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+);
+const SuccessIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+);
+const WarningIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+);
+const ChatIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+);
+
 // ─── Preconfigured Simulated Users ──────────────────────────
 const SIMULATED_USERS = [
-  { id: 1, name: 'Sarah J.', role: 'Requester', email: 'sarah.j@nomcat.io', avatarColor: '#3b82f6', icon: '📝', desc: 'Can submit new requests & bulk uploads' },
-  { id: 2, name: 'Michael R.', role: 'Approver', email: 'michael.r@nomcat.io', avatarColor: '#f59e0b', icon: '👤', desc: 'First-level approval & staging supervisor' },
-  { id: 3, name: 'Alex C.', role: 'CentralCataloger', email: 'alex.c@nomcat.io', avatarColor: '#10b981', icon: '⚙️', desc: 'Standardizes nomenclature and specifications' },
-  { id: 4, name: 'Sophia K.', role: 'CentralApprover', email: 'sophia.k@nomcat.io', avatarColor: '#8b5cf6', icon: '🏆', desc: 'Final sign-off to publish to Golden Catalog' }
+  { id: 1, name: 'Sarah J.', role: 'Requester', email: 'sarah.j@nomcat.io', avatarColor: '#3b82f6', tag: 'R', desc: 'Can submit new requests & bulk uploads' },
+  { id: 2, name: 'Michael R.', role: 'Approver', email: 'michael.r@nomcat.io', avatarColor: '#f59e0b', tag: 'A', desc: 'First-level approval & staging supervisor' },
+  { id: 3, name: 'Alex C.', role: 'CentralCataloger', email: 'alex.c@nomcat.io', avatarColor: '#10b981', tag: 'C', desc: 'Standardizes nomenclature and specifications' },
+  { id: 4, name: 'Sophia K.', role: 'CentralApprover', email: 'sophia.k@nomcat.io', avatarColor: '#8b5cf6', tag: 'CA', desc: 'Final sign-off to publish to Golden Catalog' }
 ];
 
 // ─── Zero-Dependency Markdown Parser ────────────────────────
@@ -146,7 +190,7 @@ function Login({ onLogin }) {
                 className={`login-role-card ${selectedUser?.id === user.id ? 'selected' : ''}`}
                 onClick={() => setSelectedUser(user)}
               >
-                <span className="role-card-icon">{user.icon}</span>
+                <span className="role-card-icon">{user.tag}</span>
                 <span className="role-card-title">{user.name}</span>
                 <span className="role-card-desc">{user.role.replace(/([A-Z])/g, ' $1').trim()}</span>
               </div>
@@ -263,7 +307,27 @@ function App() {
   const [summary, setSummary] = useState({});
   const [requests, setRequests] = useState([]);
   const [catalog, setCatalog] = useState([]);
-  const { toasts, addToast, dismissToast } = useToast();
+  const { toasts, addToast: originalAddToast, dismissToast } = useToast();
+  const [notifications, setNotifications] = useState([
+    { id: 1, type: 'success', title: 'System Initialized', message: 'NomCat Master Data Governance console active.', timestamp: new Date(), read: false }
+  ]);
+  const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+
+  const addToast = useCallback((type, title, message) => {
+    originalAddToast(type, title, message);
+    setNotifications(prev => [
+      {
+        id: Date.now() + Math.random(),
+        type,
+        title,
+        message,
+        timestamp: new Date(),
+        read: false
+      },
+      ...prev
+    ]);
+  }, [originalAddToast]);
 
   // NomBot Chatbot State
   const [isBotOpen, setIsBotOpen] = useState(false);
@@ -699,9 +763,7 @@ function App() {
   const approvedRate = summary.totalRequests > 0 
     ? Math.round((summary.approved / summary.totalRequests) * 100)
     : 0;
-  const duplicatePreventionRate = summary.totalRequests > 0 
-    ? Math.round((summary.duplicated / summary.totalRequests) * 100)
-    : 0;
+  const catalogUniquenessIndex = 100;
 
   // Calculate live plant distribution for bar chart
   const plantCounts = {};
@@ -760,22 +822,22 @@ function App() {
         </div>
         <div className="sidebar-menu">
           <button className={`sidebar-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-            <span className="sidebar-icon">📊</span> Dashboard
+            <span className="sidebar-icon"><DashboardIcon /></span> Dashboard
           </button>
           <button className={`sidebar-item ${activeTab === 'catalog' ? 'active' : ''}`} onClick={() => setActiveTab('catalog')}>
-            <span className="sidebar-icon">🏆</span> Material Catalog
+            <span className="sidebar-icon"><CatalogIcon /></span> Material Catalog
           </button>
           <button className={`sidebar-item ${activeTab === 'workTray' ? 'active' : ''}`} onClick={() => setActiveTab('workTray')}>
-            <span className="sidebar-icon">📋</span> Work Tray
+            <span className="sidebar-icon"><WorkTrayIcon /></span> Work Tray
           </button>
           <button className={`sidebar-item ${activeTab === 'newRequest' ? 'active' : ''}`} onClick={() => setActiveTab('newRequest')}>
-            <span className="sidebar-icon">📝</span> New Request
+            <span className="sidebar-icon"><NewRequestIcon /></span> New Request
           </button>
           <button className={`sidebar-item ${activeTab === 'bulkUpload' ? 'active' : ''}`} onClick={() => setActiveTab('bulkUpload')}>
-            <span className="sidebar-icon">📤</span> Bulk Import
+            <span className="sidebar-icon"><BulkImportIcon /></span> Bulk Import
           </button>
           <button className={`sidebar-item ${activeTab === 'reporting' ? 'active' : ''}`} onClick={() => setActiveTab('reporting')}>
-            <span className="sidebar-icon">📈</span> Reporting
+            <span className="sidebar-icon"><ReportingIcon /></span> Reporting
           </button>
         </div>
       </aside>
@@ -787,7 +849,7 @@ function App() {
         <header className="header">
           <div className="header-left">
             <div className="global-search">
-              <span className="global-search-icon">🔍</span>
+              <span className="global-search-icon"><SearchIcon /></span>
               <input
                 type="text"
                 className="global-search-input"
@@ -803,8 +865,64 @@ function App() {
             </div>
           </div>
           <div className="header-right">
-            <button className="header-action-btn" title="Notifications">🔔</button>
-            <button className="header-action-btn" title="Help/Knowledge Center">❓</button>
+            <div className="header-action-btn-wrapper">
+              <button
+                className="header-action-btn"
+                title="Notifications"
+                onClick={() => {
+                  setShowNotificationsDropdown(!showNotificationsDropdown);
+                  // Mark all notifications as read when opening
+                  setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+                }}
+              >
+                <BellIcon />
+                {notifications.some(n => !n.read) && <span className="notification-badge" />}
+              </button>
+
+              {showNotificationsDropdown && (
+                <div className="notifications-dropdown">
+                  <div className="notifications-header">
+                    <span>Notifications</span>
+                    <button
+                      className="notifications-clear-btn"
+                      onClick={() => setNotifications([])}
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                  <div className="notifications-list">
+                    {notifications.length > 0 ? (
+                      notifications.map(n => (
+                        <div key={n.id} className="notification-item">
+                          <div className={`notification-icon-wrapper ${n.type}`}>
+                            {n.type === 'success' ? <SuccessIcon /> : <WarningIcon />}
+                          </div>
+                          <div className="notification-content">
+                            <span className="notification-title">{n.title}</span>
+                            <span className="notification-message">{n.message}</span>
+                            <span className="notification-time">
+                              {n.timestamp.toLocaleTimeString()}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="notifications-empty">
+                        No notifications.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button
+              className="header-action-btn"
+              title="Help/Knowledge Center"
+              onClick={() => setShowHelpModal(true)}
+            >
+              <HelpIcon />
+            </button>
             
             {/* Centered Avatar User Card */}
             <div className="header-user-profile" onClick={() => setShowProfileDropdown(!showProfileDropdown)}>
@@ -839,7 +957,7 @@ function App() {
               <div className="washboard-card">
                 <div className="card-header-washboard">
                   <span>Catalog Overview</span>
-                  <span>🏆</span>
+                  <CatalogIcon />
                 </div>
                 <div className="catalog-overview-stats">
                   <div className="overview-stat-item">
@@ -848,7 +966,7 @@ function App() {
                   </div>
                   <div className="overview-stat-item">
                     <span className="overview-stat-value">{profiles.length || 0}</span>
-                    <span className="overview-stat-label">Template Profiles</span>
+                    <span className="overview-stat-label">Taxonomy Profiles</span>
                   </div>
                 </div>
                 <span className="washboard-badge" style={{ color: 'var(--color-success)', borderColor: 'rgba(16,185,129,0.2)' }}>
@@ -860,7 +978,7 @@ function App() {
               <div className="washboard-card search-box">
                 <div className="card-header-washboard">
                   <span>Search Catalog Inventory</span>
-                  <span>🔍</span>
+                  <SearchIcon />
                 </div>
                 <div className="washboard-search-box">
                   <input
@@ -902,7 +1020,7 @@ function App() {
               <div className="washboard-card">
                 <div className="card-header-washboard">
                   <span>Live Staging Stream</span>
-                  <span>⚡</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                 </div>
                 <div className="washboard-activity-list">
                   {requests.length === 0 ? (
@@ -932,7 +1050,7 @@ function App() {
               <div className="washboard-card two-thirds">
                 <div className="card-header-washboard">
                   <span>Dynamic Governance Metrics</span>
-                  <span>📊</span>
+                  <ReportingIcon />
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div className="washboard-progress-item">
@@ -946,11 +1064,11 @@ function App() {
                   </div>
                   <div className="washboard-progress-item">
                     <div className="progress-header">
-                      <span>Duplicate Prevention Block Rate</span>
-                      <span>{duplicatePreventionRate}%</span>
+                      <span>Catalog Uniqueness Index</span>
+                      <span>{catalogUniquenessIndex}%</span>
                     </div>
                     <div className="progress-bar-bg">
-                      <div className="progress-bar-fill purple" style={{ width: `${duplicatePreventionRate}%` }}></div>
+                      <div className="progress-bar-fill purple" style={{ width: `${catalogUniquenessIndex}%` }}></div>
                     </div>
                   </div>
                 </div>
@@ -960,7 +1078,7 @@ function App() {
               <div className="washboard-card">
                 <div className="card-header-washboard">
                   <span>Plant Material Density</span>
-                  <span>📈</span>
+                  <ReportingIcon />
                 </div>
                 <div className="chart-container">
                   {sortedPlants.map((p) => (
@@ -1524,9 +1642,87 @@ function App() {
       </div>
 
       {/* Floating NomBot Toggle Button */}
-      <button className="nombot-toggle-btn" onClick={() => setIsBotOpen(!isBotOpen)} title="Open Chat Log">
-        {isBotOpen ? '💬' : '🤖'}
+      <button className="nombot-toggle-btn" onClick={() => setIsBotOpen(!isBotOpen)} title="Open NomBot Assistant">
+        {isBotOpen ? <CloseIcon /> : <RobotIcon />}
       </button>
+
+      {/* Help / Navigation Modal */}
+      {showHelpModal && (
+        <div className="modal-overlay" onClick={() => setShowHelpModal(false)}>
+          <div className="help-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="help-modal-header">
+              <span>NOMCAT Governance Console Navigation Guide</span>
+              <button
+                className="help-modal-close"
+                onClick={() => setShowHelpModal(false)}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+            <div className="help-modal-body">
+              <div className="help-section">
+                <div className="help-section-icon"><DashboardIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">Dashboard</span>
+                  <span className="help-section-desc">
+                    View governance analytics, total records, active taxonomies, and live catalog updates streams.
+                  </span>
+                </div>
+              </div>
+
+              <div className="help-section">
+                <div className="help-section-icon"><CatalogIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">Material Catalog</span>
+                  <span className="help-section-desc">
+                    The Golden Master database registry. Search using the header global search to instantly filter the entire catalog.
+                  </span>
+                </div>
+              </div>
+
+              <div className="help-section">
+                <div className="help-section-icon"><WorkTrayIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">Work Tray</span>
+                  <span className="help-section-desc">
+                    Staging workflow queue. Approve or Reject requests matching your active login role in sequential order.
+                  </span>
+                </div>
+              </div>
+
+              <div className="help-section">
+                <div className="help-section-icon"><NewRequestIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">New Request</span>
+                  <span className="help-section-desc">
+                    Submit a single material request. Toggle AI Smart Assist to extract attributes using Gemini NLP.
+                  </span>
+                </div>
+              </div>
+
+              <div className="help-section">
+                <div className="help-section-icon"><BulkImportIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">Bulk Import</span>
+                  <span className="help-section-desc">
+                    Import multiple records at once using Excel templates, passing automated duplicate checks.
+                  </span>
+                </div>
+              </div>
+
+              <div className="help-section">
+                <div className="help-section-icon"><ReportingIcon /></div>
+                <div className="help-section-content">
+                  <span className="help-section-title">Reporting</span>
+                  <span className="help-section-desc">
+                    Export the staging database to CSV format for external validation or logging.
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
