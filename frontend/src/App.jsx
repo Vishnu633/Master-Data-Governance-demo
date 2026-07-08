@@ -61,9 +61,24 @@ const renderMarkdown = (text) => {
   const lines = text.split('\n');
   return lines.map((line, idx) => {
     let isBullet = false;
+    let isHeader = false;
+    let headerLevel = 0;
     let cleanLine = line;
-    if (line.trim().startsWith('- ')) {
+
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ') || line.trim().startsWith('• ')) {
       isBullet = true;
+      cleanLine = line.trim().substring(2);
+    } else if (line.trim().startsWith('### ')) {
+      isHeader = true;
+      headerLevel = 3;
+      cleanLine = line.trim().substring(4);
+    } else if (line.trim().startsWith('## ')) {
+      isHeader = true;
+      headerLevel = 2;
+      cleanLine = line.trim().substring(3);
+    } else if (line.trim().startsWith('# ')) {
+      isHeader = true;
+      headerLevel = 1;
       cleanLine = line.trim().substring(2);
     }
     
@@ -90,6 +105,16 @@ const renderMarkdown = (text) => {
         </li>
       );
     }
+
+    if (isHeader) {
+      const fontSize = headerLevel === 1 ? '0.85rem' : headerLevel === 2 ? '0.78rem' : '0.74rem';
+      return (
+        <div key={idx} style={{ margin: '0.6rem 0 0.3rem 0', fontWeight: '700', color: '#fff', fontSize: fontSize, borderBottom: headerLevel === 1 ? '1px solid rgba(255,255,255,0.1)' : 'none', paddingBottom: headerLevel === 1 ? '0.2rem' : '0' }}>
+          {parts}
+        </div>
+      );
+    }
+
     return <div key={idx} style={{ minHeight: '1.1em' }}>{parts}</div>;
   });
 };
@@ -2103,10 +2128,11 @@ function App() {
                           maxHeight: '150px',
                           overflowY: 'auto',
                           color: '#e2e8f0',
-                          whiteSpace: 'pre-line'
+                          whiteSpace: 'pre-line',
+                          textAlign: 'left'
                         }}
                       >
-                        {auditReport}
+                        {renderMarkdown(auditReport)}
                       </div>
                     ) : (
                       <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', textAlign: 'center', padding: '1rem 0' }}>
