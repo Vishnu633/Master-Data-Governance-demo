@@ -126,7 +126,7 @@ namespace Hofinsoft.Mdg.Controllers
             // Create request record — already past Stage 1 validation
             var request = new ItemRequest
             {
-                RequestRefNo = _ticketGen.GenerateTicketRef(),
+                RequestRefNo = _ticketGen.GenerateTicketRef(_db),
                 RequestType = dto.RequestType,
                 Noun = dto.Noun.Trim().ToUpper(),
                 Modifier = dto.Modifier.Trim().ToUpper(),
@@ -223,7 +223,7 @@ namespace Hofinsoft.Mdg.Controllers
 
                     var request = new ItemRequest
                     {
-                        RequestRefNo = _ticketGen.GenerateTicketRef(),
+                        RequestRefNo = _ticketGen.GenerateTicketRef(_db),
                         RequestType = item.RequestType,
                         Noun = item.Noun.Trim().ToUpper(),
                         Modifier = item.Modifier.Trim().ToUpper(),
