@@ -375,6 +375,7 @@ namespace Hofinsoft.Mdg.Controllers
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in AI bulk clean endpoint");
+                return StatusCode(500, "An internal error occurred during bulk cleansing.");
             }
         }
 
