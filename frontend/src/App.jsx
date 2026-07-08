@@ -313,6 +313,7 @@ function App() {
   ]);
   const [showNotificationsDropdown, setShowNotificationsDropdown] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [dashboardSubTab, setDashboardSubTab] = useState('operations'); // 'operations' or 'insights'
 
   const addToast = useCallback((type, title, message) => {
     originalAddToast(type, title, message);
@@ -628,6 +629,34 @@ function App() {
     }
   };
 
+  // ─── Delete Actions (Live Chart Update Helpers) ──────────
+  const deleteStagingRequest = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this staging request?")) return;
+    try {
+      const res = await fetch(`${API}/requests/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      addToast('success', 'Staging Queue', 'Staging request deleted.');
+      if (selectedRequest?.id === id) {
+        setSelectedRequest(null);
+      }
+      refreshAll();
+    } catch (err) {
+      addToast('error', 'Delete Failed', err.message);
+    }
+  };
+
+  const deleteGoldenRecord = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this Golden Master Record?")) return;
+    try {
+      const res = await fetch(`${API}/catalog/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(await res.text());
+      addToast('success', 'Golden Catalog', 'Catalog record deleted.');
+      refreshAll();
+    } catch (err) {
+      addToast('error', 'Delete Failed', err.message);
+    }
+  };
+
   // ─── Bulk Upload (Excel/CSV) ─────────────────────────────
   const handleBulkFile = async (file) => {
     if (!file) return;
@@ -785,6 +814,50 @@ function App() {
   }
   
   const maxCount = Math.max(...sortedPlants.map(p => p.count), 1);
+
+  // ─── Governance Insights Math ────────────────────────────
+  // 1. Taxonomy Profile Distribution (in Golden Catalog)
+  const taxonomyCounts = {};
+  catalog.forEach(item => {
+    const key = `${item.noun} / ${item.modifier}`;
+    taxonomyCounts[key] = (taxonomyCounts[key] || 0) + 1;
+  });
+  const sortedTaxonomy = Object.entries(taxonomyCounts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  const maxTaxonomyCount = Math.max(...sortedTaxonomy.map(t => t.count), 1);
+
+  // 2. Request Status Breakdown
+  const statusCounts = {
+    Validated: 0,
+    InProgress: 0,
+    Approved: 0,
+    Rejected: 0
+  };
+  requests.forEach(req => {
+    if (req.approvalStatus === 'Approved') {
+      statusCounts.Approved++;
+    } else if (req.approvalStatus === 'Rejected') {
+      statusCounts.Rejected++;
+    } else if (req.approvalStatus === 'Stage1_Validated') {
+      statusCounts.Validated++;
+    } else {
+      statusCounts.InProgress++;
+    }
+  });
+
+  // 3. Plant Distribution Donut Segments (circumference = 219.91)
+  const plantCatalogCounts = {};
+  catalog.forEach(item => {
+    const p = item.plant || 'PLT1';
+    plantCatalogCounts[p] = (plantCatalogCounts[p] || 0) + 1;
+  });
+  const totalCatalogCount = catalog.length || 1;
+  const plantDonutSegments = Object.entries(plantCatalogCounts).map(([plantCode, count]) => ({
+    plantCode,
+    count,
+    percentage: count / totalCatalogCount
+  }));
 
 
   // If not logged in, show login page
@@ -951,147 +1024,385 @@ function App() {
 
           {/* TAB: DASHBOARD (WASBOARD VIEW) */}
           {activeTab === 'dashboard' && (
-            <div className="washboard-grid">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
               
-              {/* Card 1: Catalog Overview */}
-              <div className="washboard-card">
-                <div className="card-header-washboard">
-                  <span>Catalog Overview</span>
-                  <CatalogIcon />
-                </div>
-                <div className="catalog-overview-stats">
-                  <div className="overview-stat-item">
-                    <span className="overview-stat-value">{summary.goldenRecords || 0}</span>
-                    <span className="overview-stat-label">Golden Records</span>
-                  </div>
-                  <div className="overview-stat-item">
-                    <span className="overview-stat-value">{profiles.length || 0}</span>
-                    <span className="overview-stat-label">Taxonomy Profiles</span>
-                  </div>
-                </div>
-                <span className="washboard-badge" style={{ color: 'var(--color-success)', borderColor: 'rgba(16,185,129,0.2)' }}>
-                  Active Governance Enabled
-                </span>
+              {/* Dashboard Sub-Tab Selector Navigation Bar */}
+              <div className="insights-tab-bar" style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--border-primary)', paddingBottom: '0.5rem', marginBottom: '0.25rem' }}>
+                <button
+                  className={`insights-tab-btn ${dashboardSubTab === 'operations' ? 'active' : ''}`}
+                  onClick={() => setDashboardSubTab('operations')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: dashboardSubTab === 'operations' ? '#6366f1' : 'var(--text-secondary)',
+                    fontWeight: 600,
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    paddingBottom: '0.4rem',
+                    borderBottom: dashboardSubTab === 'operations' ? '2px solid #6366f1' : '2px solid transparent',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <DashboardIcon /> Operations Console
+                </button>
+                <button
+                  className={`insights-tab-btn ${dashboardSubTab === 'insights' ? 'active' : ''}`}
+                  onClick={() => setDashboardSubTab('insights')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: dashboardSubTab === 'insights' ? '#6366f1' : 'var(--text-secondary)',
+                    fontWeight: 600,
+                    fontSize: '0.78rem',
+                    cursor: 'pointer',
+                    paddingBottom: '0.4rem',
+                    borderBottom: dashboardSubTab === 'insights' ? '2px solid #6366f1' : '2px solid transparent',
+                    transition: 'all 0.2s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ReportingIcon /> Governance Analytics & Insights
+                </button>
               </div>
 
-              {/* Card 2: Search Catalog */}
-              <div className="washboard-card search-box">
-                <div className="card-header-washboard">
-                  <span>Search Catalog Inventory</span>
-                  <SearchIcon />
-                </div>
-                <div className="washboard-search-box">
-                  <input
-                    type="text"
-                    className="form-input search-input"
-                    placeholder="Search by Material ID or short desc..."
-                    value={searchQuery}
-                    onFocus={() => setShowGoldenDropdown(true)}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setShowGoldenDropdown(true);
-                    }}
-                  />
-                  {showGoldenDropdown && searchQuery && (
-                    <div className="dropdown-results" style={{ width: '100%' }}>
-                      {filteredGolden.length === 0 ? (
-                        <div style={{ padding: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>No matches.</div>
+              {dashboardSubTab === 'operations' ? (
+                <div className="washboard-grid">
+                  {/* Card 1: Catalog Overview */}
+                  <div className="washboard-card">
+                    <div className="card-header-washboard">
+                      <span>Catalog Overview</span>
+                      <CatalogIcon />
+                    </div>
+                    <div className="catalog-overview-stats">
+                      <div className="overview-stat-item">
+                        <span className="overview-stat-value">{summary.goldenRecords || 0}</span>
+                        <span className="overview-stat-label">Golden Records</span>
+                      </div>
+                      <div className="overview-stat-item">
+                        <span className="overview-stat-value">{profiles.length || 0}</span>
+                        <span className="overview-stat-label">Taxonomy Profiles</span>
+                      </div>
+                    </div>
+                    <span className="washboard-badge" style={{ color: 'var(--color-success)', borderColor: 'rgba(16,185,129,0.2)' }}>
+                      Active Governance Enabled
+                    </span>
+                  </div>
+
+                  {/* Card 2: Search Catalog */}
+                  <div className="washboard-card search-box">
+                    <div className="card-header-washboard">
+                      <span>Search Catalog Inventory</span>
+                      <SearchIcon />
+                    </div>
+                    <div className="washboard-search-box">
+                      <input
+                        type="text"
+                        className="form-input search-input"
+                        placeholder="Search by Material ID or short desc..."
+                        value={searchQuery}
+                        onFocus={() => setShowGoldenDropdown(true)}
+                        onChange={(e) => {
+                          setSearchQuery(e.target.value);
+                          setShowGoldenDropdown(true);
+                        }}
+                      />
+                      {showGoldenDropdown && searchQuery && (
+                        <div className="dropdown-results" style={{ width: '100%' }}>
+                          {filteredGolden.length === 0 ? (
+                            <div style={{ padding: '0.5rem', fontSize: '0.72rem', color: 'var(--text-muted)' }}>No matches.</div>
+                          ) : (
+                            filteredGolden.map((rec) => (
+                              <div key={rec.id} className="dropdown-item" onClick={() => {
+                                setSearchQuery(rec.materialNumber);
+                                setShowGoldenDropdown(false);
+                                addToast('info', 'Record Detail', `${rec.materialNumber} - ${rec.shortDescription}`);
+                              }} style={{ fontSize: '0.72rem' }}>
+                                <strong>{rec.materialNumber}</strong> ({rec.plant}) — {rec.shortDescription}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => {
+                        setShowGoldenDropdown(false);
+                        setSearchQuery('');
+                      }}>Clear Search</button>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Recent Activity (Live Ingestion Stream) */}
+                  <div className="washboard-card">
+                    <div className="card-header-washboard">
+                      <span>Live Staging Stream</span>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                    </div>
+                    <div className="washboard-activity-list">
+                      {requests.length === 0 ? (
+                        <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
+                          No staging requests logged yet.
+                        </div>
                       ) : (
-                        filteredGolden.map((rec) => (
-                          <div key={rec.id} className="dropdown-item" onClick={() => {
-                            setSearchQuery(rec.materialNumber);
-                            setShowGoldenDropdown(false);
-                            addToast('info', 'Record Detail', `${rec.materialNumber} - ${rec.shortDescription}`);
-                          }} style={{ fontSize: '0.72rem' }}>
-                            <strong>{rec.materialNumber}</strong> ({rec.plant}) — {rec.shortDescription}
+                        requests.slice(0, 3).map((req) => (
+                          <div className="activity-item" key={req.id}>
+                            <span className={`activity-dot ${req.approvalStatus === 'Approved' ? '' : 'orange'}`}></span>
+                            <div className="activity-text">
+                              <strong>{req.requestRefNo} ({req.plant})</strong>
+                              <div style={{ color: 'var(--text-secondary)', fontSize: '0.68rem', marginTop: '1px' }}>
+                                {req.noun} / {req.modifier}
+                              </div>
+                            </div>
+                            <span className="activity-time" style={{ marginLeft: 'auto' }}>
+                              <StatusBadge status={req.approvalStatus} />
+                            </span>
                           </div>
                         ))
                       )}
                     </div>
-                  )}
-                  <button type="button" className="btn btn-primary btn-sm" onClick={() => {
-                    setShowGoldenDropdown(false);
-                    setSearchQuery('');
-                  }}>Clear Search</button>
-                </div>
-              </div>
+                  </div>
 
-              {/* Card 3: Recent Activity (Live Ingestion Stream) */}
-              <div className="washboard-card">
-                <div className="card-header-washboard">
-                  <span>Live Staging Stream</span>
-                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: 'middle' }}><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                </div>
-                <div className="washboard-activity-list">
-                  {requests.length === 0 ? (
-                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.72rem' }}>
-                      No staging requests logged yet.
+                  {/* Card 4: Dynamic Governance Metrics */}
+                  <div className="washboard-card two-thirds">
+                    <div className="card-header-washboard">
+                      <span>Dynamic Governance Metrics</span>
+                      <ReportingIcon />
                     </div>
-                  ) : (
-                    requests.slice(0, 3).map((req) => (
-                      <div className="activity-item" key={req.id}>
-                        <span className={`activity-dot ${req.approvalStatus === 'Approved' ? '' : 'orange'}`}></span>
-                        <div className="activity-text">
-                          <strong>{req.requestRefNo} ({req.plant})</strong>
-                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.68rem', marginTop: '1px' }}>
-                            {req.noun} / {req.modifier}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      <div className="washboard-progress-item">
+                        <div className="progress-header">
+                          <span>Staging Approval Acceptance Rate</span>
+                          <span>{approvedRate}%</span>
+                        </div>
+                        <div className="progress-bar-bg">
+                          <div className="progress-bar-fill" style={{ width: `${approvedRate}%` }}></div>
+                        </div>
+                      </div>
+                      <div className="washboard-progress-item">
+                        <div className="progress-header">
+                          <span>Catalog Uniqueness Index</span>
+                          <span>{catalogUniquenessIndex}%</span>
+                        </div>
+                        <div className="progress-bar-bg">
+                          <div className="progress-bar-fill purple" style={{ width: `${catalogUniquenessIndex}%` }}></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 5: Plant Material Density Bar Chart */}
+                  <div className="washboard-card">
+                    <div className="card-header-washboard">
+                      <span>Plant Material Density</span>
+                      <ReportingIcon />
+                    </div>
+                    <div className="chart-container">
+                      {sortedPlants.map((p) => (
+                        <div className="chart-bar-group" key={p.plantCode}>
+                          <div className="chart-bar-fill" style={{ height: `${(p.count / maxCount) * 80 + 10}px` }}></div>
+                          <span className="chart-bar-label" style={{ fontSize: '0.62rem', fontWeight: 600 }}>{p.plantCode}</span>
+                          <span style={{ fontSize: '0.58rem', color: 'var(--text-secondary)', marginTop: '-2px' }}>{p.count} items</span>
+                        </div>
+                      ))}
+                    </div>
+                    <button className="template-link" style={{ alignSelf: 'flex-end', fontSize: '0.65rem' }} onClick={() => setActiveTab('catalog')}>View Golden Catalog →</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="insights-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}>
+                  
+                  {/* Row 1: KPI Summary cards (mini stats) */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1.25rem' }}>
+                    <div className="washboard-card mini-card" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Total Ingested</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#fff', marginTop: '0.15rem' }}>{summary.totalRequests || 0}</div>
+                      </div>
+                      <div style={{ background: 'rgba(99, 102, 241, 0.1)', padding: '0.4rem', borderRadius: '50%', color: '#6366f1', display: 'flex' }}><NewRequestIcon /></div>
+                    </div>
+                    <div className="washboard-card mini-card" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Golden Master</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-success)', marginTop: '0.15rem' }}>{summary.goldenRecords || 0}</div>
+                      </div>
+                      <div style={{ background: 'rgba(16, 185, 129, 0.1)', padding: '0.4rem', borderRadius: '50%', color: 'var(--color-success)', display: 'flex' }}><CatalogIcon /></div>
+                    </div>
+                    <div className="washboard-card mini-card" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Staging Queue</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-warning)', marginTop: '0.15rem' }}>{summary.pending || 0}</div>
+                      </div>
+                      <div style={{ background: 'rgba(245, 158, 11, 0.1)', padding: '0.4rem', borderRadius: '50%', color: 'var(--color-warning)', display: 'flex' }}><WorkTrayIcon /></div>
+                    </div>
+                    <div className="washboard-card mini-card" style={{ padding: '0.85rem 1rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontSize: '0.62rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.5px' }}>Active Taxonomies</div>
+                        <div style={{ fontSize: '1.2rem', fontWeight: 700, color: '#818cf8', marginTop: '0.15rem' }}>{profiles.length || 0}</div>
+                      </div>
+                      <div style={{ background: 'rgba(129, 140, 248, 0.1)', padding: '0.4rem', borderRadius: '50%', color: '#818cf8', display: 'flex' }}><SearchIcon /></div>
+                    </div>
+                  </div>
+
+                  {/* Row 2: Charts Panel */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 0.9fr', gap: '1.25rem' }}>
+                    
+                    {/* Left Column: Taxonomy & Funnel */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      
+                      {/* Chart 1: Taxonomy Profile Distribution */}
+                      <div className="washboard-card">
+                        <div className="card-header-washboard">
+                          <span>Taxonomy Class Distribution</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>Golden Master Counts</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginTop: '0.25rem' }}>
+                          {sortedTaxonomy.map((tax, idx) => {
+                            const pct = Math.round((tax.count / maxTaxonomyCount) * 100);
+                            const hue = (idx * 55) % 360;
+                            const barColor = `hsl(${hue}, 70%, 55%)`;
+                            return (
+                              <div key={tax.name} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                                  <span style={{ fontWeight: 600, color: '#fff' }}>{tax.name}</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>{tax.count} items ({pct}%)</span>
+                                </div>
+                                <div style={{ height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                                  <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: '3px', transition: 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)' }}></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Chart 2: Governance Flow Funnel */}
+                      <div className="washboard-card">
+                        <div className="card-header-washboard">
+                          <span>Governance Lifecycle Funnel</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>Staging Ingestion Flow</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.5rem', gap: '0.5rem' }}>
+                          <div style={{ flex: 1, textAlign: 'center', background: 'rgba(255,255,255,0.02)', padding: '0.6rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border-primary)' }}>
+                            <div style={{ fontSize: '0.58rem', textTransform: 'uppercase', color: 'var(--text-secondary)', fontWeight: 600 }}>1. Ingestion</div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: '#fff', marginTop: '0.15rem' }}>{summary.totalRequests || 0}</div>
+                            <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: '2px' }}>Total Submitted</div>
+                          </div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 700 }}>→</span>
+                          <div style={{ flex: 1, textAlign: 'center', background: 'rgba(245, 158, 11, 0.05)', padding: '0.6rem 0.4rem', borderRadius: '4px', border: '1px solid rgba(245, 158, 11, 0.2)' }}>
+                            <div style={{ fontSize: '0.58rem', textTransform: 'uppercase', color: 'var(--color-warning)', fontWeight: 600 }}>2. Staging</div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-warning)', marginTop: '0.15rem' }}>{statusCounts.Validated + statusCounts.InProgress}</div>
+                            <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: '2px' }}>Under Review</div>
+                          </div>
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', fontWeight: 700 }}>→</span>
+                          <div style={{ flex: 1, textAlign: 'center', background: 'rgba(16, 185, 129, 0.05)', padding: '0.6rem 0.4rem', borderRadius: '4px', border: '1px solid rgba(16, 185, 129, 0.2)' }}>
+                            <div style={{ fontSize: '0.58rem', textTransform: 'uppercase', color: 'var(--color-success)', fontWeight: 600 }}>3. Golden</div>
+                            <div style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--color-success)', marginTop: '0.15rem' }}>{summary.goldenRecords || 0}</div>
+                            <div style={{ fontSize: '0.55rem', color: 'var(--text-muted)', marginTop: '2px' }}>Promoted</div>
                           </div>
                         </div>
-                        <span className="activity-time" style={{ marginLeft: 'auto' }}>
-                          <StatusBadge status={req.approvalStatus} />
-                        </span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.62rem', color: 'var(--text-secondary)', marginTop: '0.6rem', padding: '0 0.5rem' }}>
+                          <span>Rejected Tickets: <strong style={{ color: 'var(--color-danger)' }}>{statusCounts.Rejected}</strong></span>
+                          <span>Auto-Blocked Duplicates: <strong style={{ color: '#ec4899' }}>{summary.duplicated || 0}</strong></span>
+                        </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
 
-              {/* Card 4: Dynamic Governance Metrics */}
-              <div className="washboard-card two-thirds">
-                <div className="card-header-washboard">
-                  <span>Dynamic Governance Metrics</span>
-                  <ReportingIcon />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                  <div className="washboard-progress-item">
-                    <div className="progress-header">
-                      <span>Staging Approval Acceptance Rate</span>
-                      <span>{approvedRate}%</span>
                     </div>
-                    <div className="progress-bar-bg">
-                      <div className="progress-bar-fill" style={{ width: `${approvedRate}%` }}></div>
+
+                    {/* Right Column: Plant Donut & Completeness */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                      
+                      {/* Chart 3: Plant Distribution Ring (SVG Donut) */}
+                      <div className="washboard-card">
+                        <div className="card-header-washboard">
+                          <span>Plant Inventory Split</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>Golden Master Share</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', marginTop: '0.5rem' }}>
+                          <div style={{ position: 'relative', width: '90px', height: '90px' }}>
+                            <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)', width: '100%', height: '100%' }}>
+                              <circle cx="50" cy="50" r="35" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="12" />
+                              
+                              {(() => {
+                                let accumPct = 0;
+                                const strokeColors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899'];
+                                return plantDonutSegments.map((seg, idx) => {
+                                  const c = 2 * Math.PI * 35; // 219.91
+                                  const dashArray = `${c * seg.percentage} ${c}`;
+                                  const dashOffset = -(c * accumPct);
+                                  accumPct += seg.percentage;
+                                  return (
+                                    <circle
+                                      key={seg.plantCode}
+                                      cx="50"
+                                      cy="50"
+                                      r="35"
+                                      fill="transparent"
+                                      stroke={strokeColors[idx % strokeColors.length]}
+                                      strokeWidth="12"
+                                      strokeDasharray={dashArray}
+                                      strokeDashoffset={dashOffset}
+                                      style={{ transition: 'all 0.6s ease' }}
+                                    />
+                                  );
+                                });
+                              })()}
+                            </svg>
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                              <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#fff' }}>{summary.goldenRecords || 0}</span>
+                              <span style={{ fontSize: '0.45rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Items</span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                            {plantDonutSegments.map((seg, idx) => {
+                              const strokeColors = ['#6366f1', '#10b981', '#f59e0b', '#ec4899'];
+                              const pct = Math.round(seg.percentage * 100);
+                              return (
+                                <div key={seg.plantCode} style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.68rem' }}>
+                                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: strokeColors[idx % strokeColors.length] }}></span>
+                                  <span style={{ fontWeight: 600, color: '#fff' }}>{seg.plantCode}:</span>
+                                  <span style={{ color: 'var(--text-secondary)' }}>{seg.count} ({pct}%)</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Chart 4: Governance Quality & Completeness Index */}
+                      <div className="washboard-card">
+                        <div className="card-header-washboard">
+                          <span>Metadata Quality Index</span>
+                          <span style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>Completeness Ratio</span>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginTop: '0.5rem' }}>
+                          <div style={{ position: 'relative', width: '65px', height: '65px' }}>
+                            <svg viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)', width: '100%', height: '100%' }}>
+                              <circle cx="50" cy="50" r="40" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
+                              <circle cx="50" cy="50" r="40" fill="transparent" stroke="#10b981" strokeWidth="8" strokeDasharray="251.2" strokeDashoffset="0" />
+                            </svg>
+                            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-success)' }}>
+                              100%
+                            </div>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 600, color: '#fff' }}>Mandatory Fields Integrity</div>
+                            <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', marginTop: '2px', lineHeight: 1.3 }}>
+                              All active Golden Master Records satisfy 100% of defined attribute rules and nomenclature standards.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
                     </div>
+
                   </div>
-                  <div className="washboard-progress-item">
-                    <div className="progress-header">
-                      <span>Catalog Uniqueness Index</span>
-                      <span>{catalogUniquenessIndex}%</span>
-                    </div>
-                    <div className="progress-bar-bg">
-                      <div className="progress-bar-fill purple" style={{ width: `${catalogUniquenessIndex}%` }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
 
-              {/* Card 5: Plant Material Density Bar Chart */}
-              <div className="washboard-card">
-                <div className="card-header-washboard">
-                  <span>Plant Material Density</span>
-                  <ReportingIcon />
                 </div>
-                <div className="chart-container">
-                  {sortedPlants.map((p) => (
-                    <div className="chart-bar-group" key={p.plantCode}>
-                      <div className="chart-bar-fill" style={{ height: `${(p.count / maxCount) * 80 + 10}px` }}></div>
-                      <span className="chart-bar-label" style={{ fontSize: '0.62rem', fontWeight: 600 }}>{p.plantCode}</span>
-                      <span style={{ fontSize: '0.58rem', color: 'var(--text-secondary)', marginTop: '-2px' }}>{p.count} items</span>
-                    </div>
-                  ))}
-                </div>
-                <button className="template-link" style={{ alignSelf: 'flex-end', fontSize: '0.65rem' }} onClick={() => setActiveTab('catalog')}>View Golden Catalog →</button>
-              </div>
-
+              )}
             </div>
           )}
 
@@ -1128,6 +1439,7 @@ function App() {
                         <th>Standardized Description</th>
                         <th>Source Request</th>
                         <th>Cataloged Date</th>
+                        <th style={{ textAlign: 'center' }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1141,11 +1453,21 @@ function App() {
                             <td style={{ fontFamily: 'monospace' }}>{rec.shortDescription}</td>
                             <td>{rec.sourceRequestRef}</td>
                             <td>{new Date(rec.approvedAt).toLocaleDateString()}</td>
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                className="btn btn-danger btn-sm"
+                                style={{ padding: '0.2rem 0.35rem', background: 'transparent', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)' }}
+                                onClick={() => deleteGoldenRecord(rec.id)}
+                                title="Delete Golden Master Record"
+                              >
+                                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                              </button>
+                            </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+                          <td colSpan="8" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
                             No matching records found.
                           </td>
                         </tr>
@@ -1237,14 +1559,24 @@ function App() {
                             </td>
                             <td><StatusBadge status={req.approvalStatus} /></td>
                             <td>
-                              {req.approvalStatus !== 'Approved' && req.approvalStatus !== 'Rejected' && req.approvalStatus !== 'Duplicated' ? (
-                                <div className="btn-group" onClick={(e) => e.stopPropagation()}>
-                                  <button className="btn-approve-outline" onClick={() => handleApproval(req.id, 'Approve')}>Approve</button>
-                                  <button className="btn-reject-outline" onClick={() => handleApproval(req.id, 'Reject')}>Reject</button>
-                                </div>
-                              ) : (
-                                <span style={{ color: 'var(--text-muted)' }}>—</span>
-                              )}
+                              <div className="btn-group" style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }} onClick={(e) => e.stopPropagation()}>
+                                {req.approvalStatus !== 'Approved' && req.approvalStatus !== 'Rejected' && req.approvalStatus !== 'Duplicated' ? (
+                                  <>
+                                    <button className="btn-approve-outline" onClick={() => handleApproval(req.id, 'Approve')}>Approve</button>
+                                    <button className="btn-reject-outline" onClick={() => handleApproval(req.id, 'Reject')}>Reject</button>
+                                  </>
+                                ) : (
+                                  <span style={{ color: 'var(--text-muted)', fontSize: '0.65rem' }}>Completed</span>
+                                )}
+                                <button
+                                  className="btn btn-danger btn-sm"
+                                  style={{ padding: '0.2rem 0.35rem', background: 'transparent', border: '1px solid rgba(239, 68, 68, 0.2)', color: 'var(--color-danger)' }}
+                                  onClick={() => deleteStagingRequest(req.id)}
+                                  title="Delete Staging Request"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}

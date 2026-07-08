@@ -59,5 +59,22 @@ namespace Hofinsoft.Mdg.Controllers
                 .ToListAsync();
             return Ok(logs);
         }
+
+        /// <summary>
+        /// DELETE /api/catalog/{id}
+        /// Deletes a specific Golden Master record.
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteRecord(int id)
+        {
+            var record = await _db.GoldenMasterCatalog.FindAsync(id);
+            if (record == null)
+                return NotFound($"Golden record ID {id} not found.");
+
+            _db.GoldenMasterCatalog.Remove(record);
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Golden Record {record.MaterialNumber} successfully deleted." });
+        }
     }
 }

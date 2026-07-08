@@ -388,5 +388,22 @@ namespace Hofinsoft.Mdg.Controllers
                 });
             }
         }
+
+        /// <summary>
+        /// DELETE /api/requests/{id}
+        /// Deletes/discards a specific staging request.
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteRequest(int id)
+        {
+            var req = await _db.ItemRequests.FindAsync(id);
+            if (req == null)
+                return NotFound($"Staging request ID {id} not found.");
+
+            _db.ItemRequests.Remove(req);
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = $"Staging request {req.RequestRefNo} successfully deleted." });
+        }
     }
 }
