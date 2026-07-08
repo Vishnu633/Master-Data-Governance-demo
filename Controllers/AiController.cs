@@ -75,6 +75,27 @@ namespace Hofinsoft.Mdg.Controllers
                     return UnprocessableEntity($"AI suggested classification {aiResult.Noun}/{aiResult.Modifier} which does not exist.");
                 }
 
+                // Align/normalize attributes to match database attribute keys
+                var dbAttributes = await _db.AttributeMaster
+                    .Where(a => a.Noun == aiResult.Noun && a.Modifier == aiResult.Modifier)
+                    .Select(a => a.AttributeName)
+                    .ToListAsync();
+
+                var normalizedAttributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var dbAttr in dbAttributes)
+                {
+                    var matchedKey = aiResult.Attributes.Keys.FirstOrDefault(k => IsAttributeMatch(k, dbAttr, dbAttributes));
+                    if (matchedKey != null)
+                    {
+                        normalizedAttributes[dbAttr] = aiResult.Attributes[matchedKey];
+                    }
+                    else
+                    {
+                        normalizedAttributes[dbAttr] = "";
+                    }
+                }
+                aiResult.Attributes = normalizedAttributes;
+
                 // Generate standard descriptions using our DescriptionEngine template rules
                 var shortDesc = _descEngine.GenerateShortDescription(aiResult.Noun, aiResult.Modifier, aiResult.Attributes);
                 aiResult.GeneratedDescription = shortDesc;
@@ -187,6 +208,88 @@ namespace Hofinsoft.Mdg.Controllers
 
             var denominator = Math.Sqrt(magA) * Math.Sqrt(magB);
             return denominator == 0 ? 0 : dot / denominator;
+        }
+
+        private static bool IsAttributeMatch(string key, string dbAttr, List<string> allDbAttrs)
+        {
+            if (string.Equals(key, dbAttr, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var kClean = CleanKey(key);
+            var dClean = CleanKey(dbAttr);
+
+            if (string.Equals(kClean, dClean, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            kClean = ApplySynonyms(kClean);
+            dClean = ApplySynonyms(dClean);
+
+            if (string.Equals(kClean, dClean, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            // Handle ID / OD abbreviations
+            if (string.Equals(dbAttr, "Inside_Diameter", StringComparison.OrdinalIgnoreCase) && 
+                (string.Equals(key, "id", StringComparison.OrdinalIgnoreCase) || 
+                 string.Equals(key, "inside", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "inner", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "inside_diameter", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "inner_diameter", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            if (string.Equals(dbAttr, "Outside_Diameter", StringComparison.OrdinalIgnoreCase) && 
+                (string.Equals(key, "od", StringComparison.OrdinalIgnoreCase) || 
+                 string.Equals(key, "outside", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "outer", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "outside_diameter", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(key, "outer_diameter", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            // Handle generic "SIZE" or "DIAMETER" key mapping
+            if (string.Equals(key, "size", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "diameter", StringComparison.OrdinalIgnoreCase))
+            {
+                // For bearings: map to Inside_Diameter if it exists
+                if (string.Equals(dbAttr, "Inside_Diameter", StringComparison.OrdinalIgnoreCase))
+                    return true;
+
+                // For bolts/studs: map to Thread if it exists (e.g. M12 size)
+                if (string.Equals(dbAttr, "Thread", StringComparison.OrdinalIgnoreCase) && !allDbAttrs.Any(a => string.Equals(a, "Inside_Diameter", StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+
+            if (string.Equals(dbAttr, "Length", StringComparison.OrdinalIgnoreCase) && 
+                (string.Equals(key, "lg", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "len", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            if (string.Equals(dbAttr, "Thickness", StringComparison.OrdinalIgnoreCase) && 
+                string.Equals(key, "thk", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.Equals(dbAttr, "Width", StringComparison.OrdinalIgnoreCase) && 
+                string.Equals(key, "w", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.Equals(dbAttr, "Height", StringComparison.OrdinalIgnoreCase) && 
+                string.Equals(key, "h", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            return false;
+        }
+
+        private static string CleanKey(string val)
+        {
+            if (string.IsNullOrEmpty(val)) return "";
+            return val.Replace("_", "").Replace(" ", "").Replace("-", "").ToLower();
+        }
+
+        private static string ApplySynonyms(string val)
+        {
+            if (val == "size") return val;
+            return val
+                .Replace("inner", "inside")
+                .Replace("outer", "outside")
+                .Replace("dia", "diameter")
+                .Replace("size", "")
+                .Replace("grade", "");
         }
     }
 }
