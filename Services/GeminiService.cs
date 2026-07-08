@@ -73,7 +73,7 @@ namespace Hofinsoft.Mdg.Services
 
             try
             {
-                var url = $"/v1beta/models/gemini-2.0-flash:generateContent?key={_apiKey}";
+                var url = $"/v1beta/models/gemini-flash-latest:generateContent?key={_apiKey}";
                 var requestBody = new
                 {
                     system_instruction = new
