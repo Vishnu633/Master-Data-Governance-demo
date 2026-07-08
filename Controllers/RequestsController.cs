@@ -299,6 +299,11 @@ namespace Hofinsoft.Mdg.Controllers
             if (request.ApprovalStatus == "Approved" || request.ApprovalStatus == "Duplicated" || request.ApprovalStatus == "Rejected")
                 return BadRequest($"Request is already in terminal state: {request.ApprovalStatus}");
 
+            if (!string.Equals(request.CurrentOwnerRole, dto.Role, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest($"Action rejected: Current stage requires '{request.CurrentOwnerRole}' action, but your role is '{dto.Role}'.");
+            }
+
             if (dto.Action == "Reject")
             {
                 request.ApprovalStatus = "Rejected";

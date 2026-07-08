@@ -287,6 +287,7 @@ function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showGoldenDropdown, setShowGoldenDropdown] = useState(false);
   const [selectedGoldenRecord, setSelectedGoldenRecord] = useState(null);
+  const [globalSearch, setGlobalSearch] = useState('');
 
   // Bulk upload state
   const [bulkResults, setBulkResults] = useState(null);
@@ -779,7 +780,18 @@ function App() {
           <div className="header-left">
             <div className="global-search">
               <span className="global-search-icon">🔍</span>
-              <input type="text" className="global-search-input" placeholder="Global Search..." />
+              <input
+                type="text"
+                className="global-search-input"
+                placeholder="Global Search..."
+                value={globalSearch}
+                onChange={(e) => {
+                  setGlobalSearch(e.target.value);
+                  if (activeTab !== 'catalog') {
+                    setActiveTab('catalog');
+                  }
+                }}
+              />
             </div>
           </div>
           <div className="header-right">
@@ -958,42 +970,66 @@ function App() {
           )}
 
           {/* TAB: MATERIAL CATALOG (GOLDEN CATALOG) */}
-          {activeTab === 'catalog' && (
-            <div className="worktray-table-container">
-              <div className="worktray-table-title">
-                <span>🏆 Golden Master Catalog Records</span>
-                <span className="lifecycle-label">{catalog.length} Active record(s)</span>
-              </div>
-              <div className="data-table-wrapper">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Material Number</th>
-                      <th>Noun</th>
-                      <th>Modifier</th>
-                      <th>Plant</th>
-                      <th>Standardized Description</th>
-                      <th>Source Request</th>
-                      <th>Cataloged Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {catalog.map((rec) => (
-                      <tr key={rec.id}>
-                        <td style={{ fontWeight: 600, color: 'var(--color-success)' }}>{rec.materialNumber}</td>
-                        <td>{rec.noun}</td>
-                        <td>{rec.modifier}</td>
-                        <td style={{ fontWeight: 600, color: '#6366f1' }}>{rec.plant}</td>
-                        <td style={{ fontFamily: 'monospace' }}>{rec.shortDescription}</td>
-                        <td>{rec.sourceRequestRef}</td>
-                        <td>{new Date(rec.approvedAt).toLocaleDateString()}</td>
+          {activeTab === 'catalog' && (() => {
+            const filteredCatalog = catalog.filter(rec => {
+              if (!globalSearch.trim()) return true;
+              const query = globalSearch.toLowerCase();
+              return rec.materialNumber.toLowerCase().includes(query) ||
+                     rec.noun.toLowerCase().includes(query) ||
+                     rec.modifier.toLowerCase().includes(query) ||
+                     rec.plant.toLowerCase().includes(query) ||
+                     rec.shortDescription.toLowerCase().includes(query) ||
+                     (rec.longDescription && rec.longDescription.toLowerCase().includes(query)) ||
+                     rec.sourceRequestRef.toLowerCase().includes(query);
+            });
+
+            return (
+              <div className="worktray-table-container">
+                <div className="worktray-table-title">
+                  <span>🏆 Golden Master Catalog Records</span>
+                  <span className="lifecycle-label">
+                    {globalSearch.trim() ? `${filteredCatalog.length} Matching record(s)` : `${catalog.length} Active record(s)`}
+                  </span>
+                </div>
+                <div className="data-table-wrapper">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Material Number</th>
+                        <th>Noun</th>
+                        <th>Modifier</th>
+                        <th>Plant</th>
+                        <th>Standardized Description</th>
+                        <th>Source Request</th>
+                        <th>Cataloged Date</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {filteredCatalog.length > 0 ? (
+                        filteredCatalog.map((rec) => (
+                          <tr key={rec.id}>
+                            <td style={{ fontWeight: 600, color: 'var(--color-success)' }}>{rec.materialNumber}</td>
+                            <td>{rec.noun}</td>
+                            <td>{rec.modifier}</td>
+                            <td style={{ fontWeight: 600, color: '#6366f1' }}>{rec.plant}</td>
+                            <td style={{ fontFamily: 'monospace' }}>{rec.shortDescription}</td>
+                            <td>{rec.sourceRequestRef}</td>
+                            <td>{new Date(rec.approvedAt).toLocaleDateString()}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="7" style={{ textAlign: 'center', color: 'var(--text-secondary)', padding: '2rem' }}>
+                            No matching records found.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* TAB: WORK TRAY (MATERIAL STAGING QUEUE) */}
           {activeTab === 'workTray' && (
