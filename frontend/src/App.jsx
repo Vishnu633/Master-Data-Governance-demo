@@ -535,6 +535,9 @@ function App() {
   const [wtSearch, setWtSearch] = useState('');
   const [wtStatus, setWtStatus] = useState('');
   const [wtPlant, setWtPlant] = useState('');
+  const [reportPlantFilter, setReportPlantFilter] = useState('ALL');
+  const [reportNounFilter, setReportNounFilter] = useState('ALL');
+  const [reportStatusFilter, setReportStatusFilter] = useState('ALL');
   const [selectedRequest, setSelectedRequest] = useState(null);
 
   // AI Assist state
@@ -2428,36 +2431,143 @@ function App() {
           )}
 
           {/* TAB: REPORTING */}
-          {activeTab === 'reporting' && (
-            <div className="panel">
-              <div className="panel-header">
-                <div className="panel-title">📊 Reporting Metrics</div>
-                <button className="btn btn-primary btn-sm" onClick={() => window.open(`${API}/reporting/staging-export`, '_blank')}>
-                  📥 Export Staging Grid (CSV)
-                </button>
-              </div>
-              <div className="panel-body">
-                <div className="catalog-overview-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
-                  <div className="stat-card">
-                    <span className="stat-value indigo">{summary.totalRequests || 0}</span>
-                    <span className="stat-label">Registrations</span>
+          {activeTab === 'reporting' && (() => {
+            // Locally filter requests for preview
+            const filteredReportData = requests.filter((r) => {
+              const matchesPlant = reportPlantFilter === 'ALL' || r.plant.toLowerCase() === reportPlantFilter.toLowerCase();
+              const matchesNoun = reportNounFilter === 'ALL' || r.noun.toLowerCase() === reportNounFilter.toLowerCase();
+              const matchesStatus = reportStatusFilter === 'ALL' || r.approvalStatus === reportStatusFilter;
+              return matchesPlant && matchesNoun && matchesStatus;
+            });
+
+            // Get unique nouns from requests for filters list
+            const uniqueNouns = Array.from(new Set(requests.map(r => r.noun.toUpperCase())));
+
+            const exportFilteredUrl = `${API}/reporting/staging-export-filtered?plant=${reportPlantFilter}&noun=${reportNounFilter}&status=${reportStatusFilter}`;
+
+            return (
+              <div className="panel">
+                <div className="panel-header">
+                  <div className="panel-title">📊 Advanced Governance Reporting & Exports</div>
+                </div>
+
+                <div className="panel-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  
+                  {/* Overview Statistics */}
+                  <div className="catalog-overview-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+                    <div className="stat-card">
+                      <span className="stat-value indigo">{summary.totalRequests || 0}</span>
+                      <span className="stat-label">Total Submissions</span>
+                    </div>
+                    <div className="stat-card">
+                      <span className="stat-value emerald">{summary.approved || 0}</span>
+                      <span className="stat-label">Promoted to Golden</span>
+                    </div>
+                    <div className="stat-card">
+                      <span className="stat-value red">{summary.duplicated || 0}</span>
+                      <span className="stat-label">Duplications Blocked</span>
+                    </div>
+                    <div className="stat-card">
+                      <span className="stat-value cyan">{summary.exports || 0}</span>
+                      <span className="stat-label">System Exports Logged</span>
+                    </div>
                   </div>
-                  <div className="stat-card">
-                    <span className="stat-value emerald">{summary.approved || 0}</span>
-                    <span className="stat-label">Approved Records</span>
+
+                  {/* Filter Controls for Custom Exports & Previews */}
+                  <div className="form-section-card" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', padding: '1rem' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Filter by Plant</label>
+                      <select className="form-select-aligned" style={{ width: '100%' }} value={reportPlantFilter} onChange={(e) => setReportPlantFilter(e.target.value)}>
+                        <option value="ALL">All Plants (ALL)</option>
+                        <option value="PLT1">Plant 1 (PLT1)</option>
+                        <option value="PLT2">Plant 2 (PLT2)</option>
+                        <option value="PLT3">Plant 3 (PLT3)</option>
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Filter by Noun / Category</label>
+                      <select className="form-select-aligned" style={{ width: '100%' }} value={reportNounFilter} onChange={(e) => setReportNounFilter(e.target.value)}>
+                        <option value="ALL">All Nouns (ALL)</option>
+                        {uniqueNouns.map(noun => (
+                          <option key={noun} value={noun}>{noun}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      <label style={{ fontSize: '0.65rem', fontWeight: 600, color: 'var(--text-secondary)' }}>Filter by Status</label>
+                      <select className="form-select-aligned" style={{ width: '100%' }} value={reportStatusFilter} onChange={(e) => setReportStatusFilter(e.target.value)}>
+                        <option value="ALL">All Statuses (ALL)</option>
+                        <option value="Stage1_Validated">Stage 1 Validated</option>
+                        <option value="In_Progress">Under Review</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Rejected">Rejected</option>
+                        <option value="Duplicated">Duplicated</option>
+                      </select>
+                    </div>
                   </div>
-                  <div className="stat-card">
-                    <span className="stat-value red">{summary.duplicated || 0}</span>
-                    <span className="stat-label">Duplications Blocked</span>
+
+                  {/* Actions Bar */}
+                  <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                    <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }} onClick={() => window.open(exportFilteredUrl, '_blank')}>
+                      📥 Export Filtered Staging (CSV)
+                    </button>
+                    <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: 'rgba(59, 130, 246, 0.4)' }} onClick={() => window.open(`${API}/reporting/catalog-export`, '_blank')}>
+                      🏆 Export Golden Catalog (CSV)
+                    </button>
+                    <button className="btn btn-outline btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }} onClick={() => window.print()}>
+                      🖨️ Print Staging Report
+                    </button>
                   </div>
-                  <div className="stat-card">
-                    <span className="stat-value cyan">{summary.exports || 0}</span>
-                    <span className="stat-label">Bridge Exports Logged</span>
+
+                  {/* Interactive Ledger Preview Table */}
+                  <div className="table-container">
+                    <div style={{ padding: '0.75rem 1rem', background: 'rgba(255,255,255,0.01)', borderBottom: '1px solid var(--border-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#fff' }}>Staging Ledger Preview ({filteredReportData.length} records matched)</span>
+                    </div>
+                    {filteredReportData.length === 0 ? (
+                      <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.74rem' }}>
+                        No records match the active report filters.
+                      </div>
+                    ) : (
+                      <table className="catalog-table">
+                        <thead>
+                          <tr>
+                            <th>Ticket Ref</th>
+                            <th>Plant</th>
+                            <th>Noun / Modifier</th>
+                            <th>Standardized Description</th>
+                            <th>Workflow Status</th>
+                            <th>Created On</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredReportData.map((item) => (
+                            <tr key={item.id}>
+                              <td style={{ fontWeight: '600', color: 'var(--color-indigo)' }}>{item.requestRefNo}</td>
+                              <td><span className="badge-plant">{item.plant}</span></td>
+                              <td><strong>{item.noun}</strong> — {item.modifier}</td>
+                              <td style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: '#fff' }}>{item.shortDescription}</td>
+                              <td>
+                                <span className={`badge-status ${item.approvalStatus.toLowerCase()}`}>
+                                  {item.approvalStatus === 'Stage1_Validated' ? 'Stage 1 Validated' : item.approvalStatus}
+                                </span>
+                              </td>
+                              <td style={{ fontSize: '0.62rem', color: 'var(--text-secondary)' }}>
+                                {new Date(item.createdAt).toLocaleDateString()}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
+
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
         </main>
 

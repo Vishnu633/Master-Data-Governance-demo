@@ -147,6 +147,7 @@ namespace Hofinsoft.Mdg.Services
             sb.AppendLine("Ensure data values match the real database status exactly. Do not use placeholders like X or Y in output; output actual calculated integers.");
             sb.AppendLine();
             sb.AppendLine("Format responses in markdown. Be concise but informative. If asked to count specific items, inspect the records list above and calculate the count accurately.");
+            sb.AppendLine("CRITICAL CONSTRAINT: DO NOT start your response with standard greetings, introductions, or repetitive summaries like 'Hello! I am NomBot, your dedicated assistant...'. Instead, jump directly into answering the query or displaying the requested charts.");
 
             return sb.ToString();
         }
