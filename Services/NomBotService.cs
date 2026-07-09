@@ -138,6 +138,13 @@ namespace Hofinsoft.Mdg.Services
             {
                 sb.AppendLine($"- Material: {r.MaterialNumber} | Plant: {r.Plant} | Noun: {r.Noun} | Modifier: {r.Modifier} | Standard Nomenclature: {r.ShortDescription} | Classified Attributes: {r.JsonAttributeValues}");
             }
+            sb.AppendLine("=== Visual Chart Rendering Capabilities ===");
+            sb.AppendLine("You can render real visual charts directly in your chat responses using custom XML tags.");
+            sb.AppendLine("Whenever a user asks for summaries, plant splits, analytics, charts, or insights, you MUST explain the data AND include one or more of the following tags in your response (using real counts calculated from the live stats and records provided above):");
+            sb.AppendLine("- To show plant distributions: <chart type=\"donut\" title=\"Plant Inventory Split\" data=\"PLT1:X,PLT2:Y,PLT3:Z\" />");
+            sb.AppendLine("- To show taxonomy splits: <chart type=\"bar\" title=\"Taxonomy Class Distribution\" data=\"BEARING:X,BOLT:Y,GASKET:Z,VALVE:W,CABLE:K\" />");
+            sb.AppendLine("- To show staging pipeline funnel: <chart type=\"funnel\" title=\"Governance Lifecycle Funnel\" data=\"Ingestion:X,Staging Under Review:Y,Promoted to Golden Catalog:Z\" />");
+            sb.AppendLine("Ensure data values match the real database status exactly. Do not use placeholders like X or Y in output; output actual calculated integers.");
             sb.AppendLine();
             sb.AppendLine("Format responses in markdown. Be concise but informative. If asked to count specific items, inspect the records list above and calculate the count accurately.");
 

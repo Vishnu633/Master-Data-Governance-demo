@@ -55,11 +55,154 @@ const SIMULATED_USERS = [
   { id: 4, name: 'Sophia K.', role: 'CentralApprover', email: 'sophia.k@nomcat.io', avatarColor: '#8b5cf6', tag: 'CA', desc: 'Final sign-off to publish to Golden Catalog' }
 ];
 
+// ─── Zero-Dependency Chart Helper & Parser ──────────────────
+const parseChartTag = (line) => {
+  const typeMatch = line.match(/type="([^"]+)"/);
+  const titleMatch = line.match(/title="([^"]+)"/);
+  const dataMatch = line.match(/data="([^"]+)"/);
+  if (!typeMatch || !dataMatch) return null;
+  return {
+    type: typeMatch[1],
+    title: titleMatch ? titleMatch[1] : 'Chart',
+    data: dataMatch[1].split(',').map(item => {
+      const parts = item.split(':');
+      return { label: parts[0], value: parseFloat(parts[1] || 0) };
+    })
+  };
+};
+
+const renderChartComponent = (type, title, data) => {
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#3f51b5', '#009688'];
+
+  if (type === 'donut') {
+    const total = data.reduce((sum, d) => sum + d.value, 0);
+    let accumulatedOffset = 0;
+    const radius = 30;
+    const circ = 2 * Math.PI * radius;
+
+    return (
+      <div className="nombot-inline-chart donut-chart-container" style={{ margin: '0.75rem 0', background: 'rgba(30, 41, 59, 0.4)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem', textAlign: 'left' }}>📊 {title}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <div style={{ position: 'relative', width: '80px', height: '80px', flexShrink: 0 }}>
+            <svg width="80" height="80" viewBox="0 0 80 80">
+              <circle cx="40" cy="40" r={radius} fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
+              {data.map((item, idx) => {
+                const percentage = total > 0 ? item.value / total : 0;
+                const strokeLength = percentage * circ;
+                const strokeOffset = circ - strokeLength + accumulatedOffset;
+                accumulatedOffset -= strokeLength;
+                return (
+                  <circle
+                    key={idx}
+                    cx="40"
+                    cy="40"
+                    r={radius}
+                    fill="transparent"
+                    stroke={colors[idx % colors.length]}
+                    strokeWidth="8"
+                    strokeDasharray={`${strokeLength} ${circ}`}
+                    strokeDashoffset={strokeOffset}
+                    transform="rotate(-90 40 40)"
+                    style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+                  />
+                );
+              })}
+            </svg>
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontSize: '0.65rem', fontWeight: 'bold', color: '#fff' }}>
+              {total}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: 1 }}>
+            {data.map((item, idx) => (
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.6rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: colors[idx % colors.length] }}></span>
+                  <span style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+                </div>
+                <strong style={{ color: '#fff' }}>{item.value} ({total > 0 ? Math.round((item.value / total) * 100) : 0}%)</strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (type === 'bar') {
+    const maxVal = Math.max(...data.map(d => d.value), 1);
+    return (
+      <div className="nombot-inline-chart bar-chart-container" style={{ margin: '0.75rem 0', background: 'rgba(30, 41, 59, 0.4)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem', textAlign: 'left' }}>📊 {title}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+          {data.map((item, idx) => {
+            const percentage = Math.round((item.value / maxVal) * 100);
+            return (
+              <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>{item.label}</span>
+                  <strong style={{ color: '#fff' }}>{item.value}</strong>
+                </div>
+                <div style={{ width: '100%', height: '6px', background: 'rgba(255,255,255,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                  <div style={{ width: `${percentage}%`, height: '100%', background: `linear-gradient(90deg, ${colors[idx % colors.length]} 0%, rgba(255,255,255,0.4) 100%)`, borderRadius: '3px', transition: 'width 0.5s ease' }}></div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  if (type === 'funnel') {
+    const total = data[0]?.value || 1;
+    return (
+      <div className="nombot-inline-chart funnel-chart-container" style={{ margin: '0.75rem 0', background: 'rgba(30, 41, 59, 0.4)', padding: '0.75rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#fff', marginBottom: '0.5rem', textAlign: 'left' }}>📊 {title}</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'center' }}>
+          {data.map((item, idx) => {
+            const widthPct = Math.max(100 - idx * 15, 30);
+            return (
+              <div key={idx} style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                {idx > 0 && <span style={{ fontSize: '0.5rem', color: 'rgba(255,255,255,0.2)', margin: '0.1rem 0' }}>▼</span>}
+                <div style={{
+                  width: `${widthPct}%`,
+                  background: `linear-gradient(135deg, rgba(79, 70, 229, 0.3) 0%, rgba(59, 130, 246, 0.3) 100%)`,
+                  border: '1px solid rgba(99, 102, 241, 0.2)',
+                  borderRadius: '4px',
+                  padding: '0.3rem 0.5rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  fontSize: '0.62rem',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
+                }}>
+                  <span style={{ color: '#fff', fontWeight: 500 }}>{item.label}</span>
+                  <strong style={{ color: '#fff' }}>{item.value}</strong>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+};
+
 // ─── Zero-Dependency Markdown Parser ────────────────────────
 const renderMarkdown = (text) => {
   if (!text) return "";
   const lines = text.split('\n');
   return lines.map((line, idx) => {
+    if (line.trim().startsWith('<chart ')) {
+      const parsed = parseChartTag(line);
+      if (parsed) {
+        return renderChartComponent(parsed.type, parsed.title, parsed.data);
+      }
+    }
+
     let isBullet = false;
     let isHeader = false;
     let headerLevel = 0;
